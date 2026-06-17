@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { z } from "zod";
 import { Prisma, PrismaClient } from "../../generated/client";
 import { sanitizeDrawingData } from "../../security";
+import { RequestLimits } from "../../utils/limits";
 
 export class ImportValidationError extends Error {
   status: number;
@@ -15,6 +16,36 @@ export class ImportValidationError extends Error {
     this.status = status;
   }
 }
+
+export class ImportPayloadTooLargeError extends ImportValidationError {
+  limitMb: number;
+
+  constructor(message: string, limitMb: number) {
+    super(message, 413);
+    this.name = "ImportPayloadTooLargeError";
+    this.limitMb = limitMb;
+  }
+}
+
+export const respondToImportError = (
+  res: express.Response,
+  error: ImportValidationError,
+  fallbackError: string,
+) => {
+  if (error instanceof ImportPayloadTooLargeError) {
+    return res.status(413).json({
+      error: "Payload too large",
+      message: error.message,
+      limitMb: error.limitMb,
+      code: "PAYLOAD_TOO_LARGE",
+    });
+  }
+
+  return res.status(error.status).json({
+    error: fallbackError,
+    message: error.message,
+  });
+};
 
 export const excalidashManifestSchemaV1 = z.object({
   format: z.literal("excalidash"),
@@ -66,12 +97,7 @@ export type RegisterImportExportDeps = {
   invalidateDrawingsCache: () => void;
   removeFileIfExists: (filePath?: string) => Promise<void>;
   verifyDatabaseIntegrityAsync: (filePath: string) => Promise<boolean>;
-  MAX_IMPORT_ARCHIVE_ENTRIES: number;
-  MAX_IMPORT_COLLECTIONS: number;
-  MAX_IMPORT_DRAWINGS: number;
-  MAX_IMPORT_MANIFEST_BYTES: number;
-  MAX_IMPORT_DRAWING_BYTES: number;
-  MAX_IMPORT_TOTAL_EXTRACTED_BYTES: number;
+  limits: RequestLimits;
 };
 
 const getZipEntries = (zip: JSZip) => Object.values(zip.files).filter((entry) => !entry.dir);

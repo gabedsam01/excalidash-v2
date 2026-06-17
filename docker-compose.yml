@@ -3,17 +3,27 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: excalidash-backend
     environment:
-      - DATABASE_URL=file:/app/prisma/dev.db
-      - PORT=8000
-      - NODE_ENV=production
-      - AUTH_MODE=local
-      - FRONTEND_URL=https://excalidash.gabedsam01.shop
-      - TRUST_PROXY=1
-      - ENFORCE_HTTPS_REDIRECT=false
-      - JWT_SECRET=super_secret_hash_gabriel_2026_!@#
-      - CSRF_SECRET=outra_senha_secreta_gabriel_123
+      DATABASE_URL: ${DATABASE_URL:-file:/app/prisma/dev.db}
+      PORT: ${PORT:-8000}
+      NODE_ENV: ${NODE_ENV:-production}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:6767}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      ENFORCE_HTTPS_REDIRECT: ${ENFORCE_HTTPS_REDIRECT:-false}
+      JWT_SECRET: ${JWT_SECRET:-}
+      CSRF_SECRET: ${CSRF_SECRET:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-250}
+      MAX_JSON_BODY_MB: ${MAX_JSON_BODY_MB:-100}
+      MAX_URLENCODED_BODY_MB: ${MAX_URLENCODED_BODY_MB:-100}
+      MAX_SOCKET_PAYLOAD_MB: ${MAX_SOCKET_PAYLOAD_MB:-100}
+      MAX_IMPORT_DRAWING_MB: ${MAX_IMPORT_DRAWING_MB:-100}
+      MAX_IMPORT_MANIFEST_MB: ${MAX_IMPORT_MANIFEST_MB:-10}
+      MAX_IMPORT_TOTAL_EXTRACTED_MB: ${MAX_IMPORT_TOTAL_EXTRACTED_MB:-500}
+      MAX_DATA_URL_MB: ${MAX_DATA_URL_MB:-100}
+      MAX_IMPORT_ARCHIVE_ENTRIES: ${MAX_IMPORT_ARCHIVE_ENTRIES:-10000}
+      MAX_IMPORT_COLLECTIONS: ${MAX_IMPORT_COLLECTIONS:-2000}
+      MAX_IMPORT_DRAWINGS: ${MAX_IMPORT_DRAWINGS:-10000}
     volumes:
       - backend-data:/app/prisma
     networks:
@@ -36,13 +46,16 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    container_name: excalidash-frontend
     ports:
-      - "6767:80"
+      - "${FRONTEND_PORT:-6767}:80"
     environment:
-      # Backend URL for nginx proxy (host:port format, no protocol)
-      # Override for reverse proxy setups (e.g., excalidash-backend.svc.cluster.local:8000)
-      - BACKEND_URL=backend:8000
+      BACKEND_URL: ${BACKEND_URL:-backend:8000}
+      NGINX_CLIENT_MAX_BODY_SIZE: ${NGINX_CLIENT_MAX_BODY_SIZE:-250M}
+      NGINX_PROXY_CONNECT_TIMEOUT: ${NGINX_PROXY_CONNECT_TIMEOUT:-300s}
+      NGINX_PROXY_SEND_TIMEOUT: ${NGINX_PROXY_SEND_TIMEOUT:-300s}
+      NGINX_PROXY_READ_TIMEOUT: ${NGINX_PROXY_READ_TIMEOUT:-300s}
+      NGINX_WEBSOCKET_READ_TIMEOUT: ${NGINX_WEBSOCKET_READ_TIMEOUT:-3600s}
+      NGINX_WEBSOCKET_SEND_TIMEOUT: ${NGINX_WEBSOCKET_SEND_TIMEOUT:-3600s}
     depends_on:
       - backend
     networks:

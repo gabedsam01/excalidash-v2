@@ -19,6 +19,7 @@ import {
   sanitizeSvg,
   elementSchema,
   appStateSchema,
+  configureSecuritySettings,
 } from "./security";
 import { config } from "./config";
 import { authModeService, requireAuth, optionalAuth } from "./middleware/auth";
@@ -82,14 +83,11 @@ const isAllowedOrigin = (origin?: string): boolean => {
 };
 
 const uploadDir = path.resolve(__dirname, "../uploads");
-const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 const MAX_PAGE_SIZE = 200;
-const MAX_IMPORT_ARCHIVE_ENTRIES = 6000;
-const MAX_IMPORT_COLLECTIONS = 1000;
-const MAX_IMPORT_DRAWINGS = 5000;
-const MAX_IMPORT_MANIFEST_BYTES = 2 * 1024 * 1024;
-const MAX_IMPORT_DRAWING_BYTES = 5 * 1024 * 1024;
-const MAX_IMPORT_TOTAL_EXTRACTED_BYTES = 120 * 1024 * 1024;
+
+configureSecuritySettings({
+  maxDataUrlSize: config.limits.dataUrl.bytes,
+});
 
 let cachedBackendVersion: string | null = null;
 const getBackendVersion = (): string => {
@@ -138,7 +136,7 @@ const io = new Server(httpServer, {
     origin: (origin, cb) => cb(null, isAllowedOrigin(origin ?? undefined)),
     credentials: true,
   },
-  maxHttpBufferSize: 50 * 1024 * 1024,
+  maxHttpBufferSize: config.limits.socketPayload.bytes,
 });
 const parseJsonField = <T>(
   rawValue: string | null | undefined,
@@ -202,7 +200,7 @@ const PORT = config.port;
 const upload = multer({
   dest: uploadDir,
   limits: {
-    fileSize: MAX_UPLOAD_SIZE_BYTES,
+    fileSize: config.limits.upload.bytes,
     files: 1,
   },
   fileFilter: (req, file, cb) => {
@@ -270,8 +268,13 @@ app.use(
     exposedHeaders: ["x-csrf-token", "x-request-id"],
   })
 );
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: config.limits.jsonBody.bytes }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: config.limits.urlencodedBody.bytes,
+  }),
+);
 
 app.use((req, res, next) => {
   const requestId = req.headers["x-request-id"] || "unknown";
@@ -646,12 +649,7 @@ registerImportExportRoutes({
   invalidateDrawingsCache,
   removeFileIfExists,
   verifyDatabaseIntegrityAsync,
-  MAX_IMPORT_ARCHIVE_ENTRIES,
-  MAX_IMPORT_COLLECTIONS,
-  MAX_IMPORT_DRAWINGS,
-  MAX_IMPORT_MANIFEST_BYTES,
-  MAX_IMPORT_DRAWING_BYTES,
-  MAX_IMPORT_TOTAL_EXTRACTED_BYTES,
+  limits: config.limits,
 });
 
 app.use(errorHandler);

@@ -4,6 +4,11 @@
 import dotenv from "dotenv";
 import crypto from "crypto";
 import path from "path";
+import {
+  loadRequestLimits,
+  RequestLimits,
+  summarizeRequestLimits,
+} from "./utils/limits";
 
 dotenv.config();
 
@@ -26,6 +31,7 @@ interface Config {
   enforceHttpsRedirect: boolean;
   bootstrapSetupCodeTtlMs: number;
   bootstrapSetupCodeMaxAttempts: number;
+  limits: RequestLimits;
 }
 
 export type AuthMode = "local" | "hybrid" | "oidc_enforced";
@@ -327,6 +333,7 @@ export const config: Config = {
     "BOOTSTRAP_SETUP_CODE_MAX_ATTEMPTS",
     10,
   ),
+  limits: loadRequestLimits(),
 };
 
 if (config.nodeEnv === "production") {
@@ -356,3 +363,7 @@ if (config.nodeEnv === "production") {
 }
 
 console.log("Configuration validated successfully");
+console.log(
+  "[config] Effective payload/import limits:",
+  summarizeRequestLimits(config.limits),
+);

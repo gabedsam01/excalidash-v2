@@ -28,8 +28,7 @@ export const registerLegacySqliteImportRoutes = (deps: RegisterImportExportDeps)
     invalidateDrawingsCache,
     removeFileIfExists,
     verifyDatabaseIntegrityAsync,
-    MAX_IMPORT_COLLECTIONS,
-    MAX_IMPORT_DRAWINGS,
+    limits,
   } = deps;
 
   app.post("/import/sqlite/legacy/verify", requireAuth, upload.single("db"), asyncHandler(async (req, res) => {
@@ -70,16 +69,16 @@ export const registerLegacySqliteImportRoutes = (deps: RegisterImportExportDeps)
         const collectionsCount = collectionTable
           ? Number(db.prepare(`SELECT COUNT(1) as c FROM "${collectionTable}"`).get()?.c ?? 0)
           : 0;
-        if (drawingsCount > MAX_IMPORT_DRAWINGS) {
+        if (drawingsCount > limits.importDrawings) {
           return res.status(400).json({
             error: "Invalid legacy DB",
-            message: `Too many drawings (max ${MAX_IMPORT_DRAWINGS})`,
+            message: `Too many drawings (max ${limits.importDrawings})`,
           });
         }
-        if (collectionsCount > MAX_IMPORT_COLLECTIONS) {
+        if (collectionsCount > limits.importCollections) {
           return res.status(400).json({
             error: "Invalid legacy DB",
-            message: `Too many collections (max ${MAX_IMPORT_COLLECTIONS})`,
+            message: `Too many collections (max ${limits.importCollections})`,
           });
         }
 
@@ -185,16 +184,16 @@ export const registerLegacySqliteImportRoutes = (deps: RegisterImportExportDeps)
           : [];
         const importedDrawings: any[] = legacyDb.prepare(`SELECT * FROM "${drawingTable}"`).all();
 
-        if (importedCollections.length > MAX_IMPORT_COLLECTIONS) {
+        if (importedCollections.length > limits.importCollections) {
           return res.status(400).json({
             error: "Invalid legacy DB",
-            message: `Too many collections (max ${MAX_IMPORT_COLLECTIONS})`,
+            message: `Too many collections (max ${limits.importCollections})`,
           });
         }
-        if (importedDrawings.length > MAX_IMPORT_DRAWINGS) {
+        if (importedDrawings.length > limits.importDrawings) {
           return res.status(400).json({
             error: "Invalid legacy DB",
-            message: `Too many drawings (max ${MAX_IMPORT_DRAWINGS})`,
+            message: `Too many drawings (max ${limits.importDrawings})`,
           });
         }
 

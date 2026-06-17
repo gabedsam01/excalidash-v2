@@ -17,6 +17,7 @@ A self-hosted dashboard and organizer for [Excalidraw](https://github.com/excali
 - [Installation](#installation)
   - [Quickstart](#quickstart)
   - [Advanced](#advanced)
+- [Deployment and reverse proxies](#deployment-and-reverse-proxies)
 - [Development](#development)
 - [Credits](#credits)
 
@@ -138,6 +139,13 @@ Notes:
 
 Prereqs: Docker + Docker Compose v2.
 
+For a repository checkout, start from the generic environment example:
+
+```bash
+cp .env.example .env
+docker compose config
+```
+
 <details>
 <summary>Docker Hub (Recommended)</summary>
 
@@ -218,6 +226,14 @@ frontend:
 ```
 
 </details>
+
+## Deployment and reverse proxies
+
+The base Compose files are proxy-agnostic: they contain no fixed domain,
+Traefik labels, or embedded secrets. See
+[docs/deployment.md](docs/deployment.md) for local access, large-upload sizing,
+Nginx, Caddy, Traefik, Cloudflare Tunnel, Coolify, Easypanel, and Dokploy
+examples.
 
 <details>
 <summary>Scaling / HA (Current Limitations)</summary>
@@ -391,6 +407,12 @@ Base values are documented in `backend/.env.example`. Common ones to care about:
 | `CSRF_SECRET`            | `change-this-secret`      | Recommended in production so CSRF validation remains stable across restarts.        |
 | `AUTH_MODE`              | `local`                   | `local`, `hybrid`, `oidc_enforced`.                                                 |
 | `ENFORCE_HTTPS_REDIRECT` | `true`                    | Set to `false` to disable the built-in HTTP→HTTPS redirect when your outer gateway handles it. |
+| `MAX_UPLOAD_MB`          | `250`                     | Multipart backup and legacy database upload limit.                                 |
+| `MAX_JSON_BODY_MB`       | `100`                     | JSON body limit, including individual drawing imports.                             |
+| `MAX_SOCKET_PAYLOAD_MB`  | `100`                     | Socket.IO message limit.                                                           |
+| `MAX_IMPORT_DRAWING_MB`  | `100`                     | Maximum extracted drawing size in an ExcaliDash backup.                            |
+| `MAX_IMPORT_TOTAL_EXTRACTED_MB` | `500`              | Maximum total extracted backup content.                                            |
+| `MAX_DATA_URL_MB`        | `100`                     | Maximum embedded image data URL size retained during sanitization.                 |
 
 </details>
 

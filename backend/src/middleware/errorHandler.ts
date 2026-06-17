@@ -3,12 +3,30 @@
  * Sanitizes error messages in production to prevent information leakage
  */
 import { Request, Response, NextFunction } from "express";
+import multer from "multer";
 import { config } from "../config";
+import { bytesToMb } from "../utils/limits";
 
 export interface AppError extends Error {
   statusCode?: number;
+  status?: number;
+  type?: string;
+  limit?: number;
   isOperational?: boolean;
 }
+
+const sendPayloadTooLarge = (
+  res: Response,
+  message: string,
+  limitMb: number,
+): void => {
+  res.status(413).json({
+    error: "Payload too large",
+    message,
+    limitMb,
+    code: "PAYLOAD_TOO_LARGE",
+  });
+};
 
 /**
  * Error handler middleware
@@ -20,12 +38,52 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ): void => {
-  const statusCode = err.statusCode || 500;
+  if (
+    err instanceof multer.MulterError &&
+    err.code === "LIMIT_FILE_SIZE"
+  ) {
+    console.warn("[upload] File rejected because it exceeds MAX_UPLOAD_MB", {
+      path: req.path,
+      method: req.method,
+      limitMb: config.limits.upload.mb,
+    });
+    sendPayloadTooLarge(
+      res,
+      "The uploaded file exceeds the configured limit.",
+      config.limits.upload.mb,
+    );
+    return;
+  }
+
+  if (err.type === "entity.too.large") {
+    const configuredLimit =
+      req.is("application/x-www-form-urlencoded")
+        ? config.limits.urlencodedBody
+        : config.limits.jsonBody;
+    const limitMb =
+      typeof err.limit === "number" && Number.isFinite(err.limit)
+        ? bytesToMb(err.limit)
+        : configuredLimit.mb;
+
+    console.warn("[upload] Request body rejected because it is too large", {
+      path: req.path,
+      method: req.method,
+      limitMb,
+    });
+    sendPayloadTooLarge(
+      res,
+      "The request body exceeds the configured limit.",
+      limitMb,
+    );
+    return;
+  }
+
+  const statusCode = err.statusCode || err.status || 500;
   const isDevelopment = config.nodeEnv === "development";
 
   console.error("Error:", {
     message: err.message,
-    stack: err.stack,
+    ...(isDevelopment ? { stack: err.stack } : {}),
     statusCode,
     path: req.path,
     method: req.method,

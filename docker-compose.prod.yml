@@ -1,19 +1,27 @@
 services:
   backend:
-    image: zimengxiong/excalidash-backend:latest
-    container_name: excalidash-backend
+    image: ${EXCALIDASH_BACKEND_IMAGE:-zimengxiong/excalidash-backend}:${EXCALIDASH_IMAGE_TAG:-latest}
     environment:
-      - DATABASE_URL=file:/app/prisma/dev.db
-      - PORT=8000
-      - NODE_ENV=production
-      - AUTH_MODE=${AUTH_MODE:-local}
-      # Keep disabled by default; only enable when a trusted proxy sanitizes forwarded headers.
-      - TRUST_PROXY=false
-      # Optional for single-instance deployments:
-      # if unset, backend auto-generates and persists one in the volume.
-      # Recommended to set explicitly for portability and multi-instance setups.
-      - JWT_SECRET=${JWT_SECRET}
-      - CSRF_SECRET=${CSRF_SECRET}
+      DATABASE_URL: ${DATABASE_URL:-file:/app/prisma/dev.db}
+      PORT: ${PORT:-8000}
+      NODE_ENV: ${NODE_ENV:-production}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:6767}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      ENFORCE_HTTPS_REDIRECT: ${ENFORCE_HTTPS_REDIRECT:-false}
+      JWT_SECRET: ${JWT_SECRET:-}
+      CSRF_SECRET: ${CSRF_SECRET:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-250}
+      MAX_JSON_BODY_MB: ${MAX_JSON_BODY_MB:-100}
+      MAX_URLENCODED_BODY_MB: ${MAX_URLENCODED_BODY_MB:-100}
+      MAX_SOCKET_PAYLOAD_MB: ${MAX_SOCKET_PAYLOAD_MB:-100}
+      MAX_IMPORT_DRAWING_MB: ${MAX_IMPORT_DRAWING_MB:-100}
+      MAX_IMPORT_MANIFEST_MB: ${MAX_IMPORT_MANIFEST_MB:-10}
+      MAX_IMPORT_TOTAL_EXTRACTED_MB: ${MAX_IMPORT_TOTAL_EXTRACTED_MB:-500}
+      MAX_DATA_URL_MB: ${MAX_DATA_URL_MB:-100}
+      MAX_IMPORT_ARCHIVE_ENTRIES: ${MAX_IMPORT_ARCHIVE_ENTRIES:-10000}
+      MAX_IMPORT_COLLECTIONS: ${MAX_IMPORT_COLLECTIONS:-2000}
+      MAX_IMPORT_DRAWINGS: ${MAX_IMPORT_DRAWINGS:-10000}
       # Optional OIDC settings (required for AUTH_MODE=hybrid or oidc_enforced)
       # - OIDC_PROVIDER_NAME=Authentik
       # - OIDC_ISSUER_URL=https://auth.example.com/application/o/excalidash/
@@ -39,10 +47,17 @@ services:
       retries: 3
 
   frontend:
-    image: zimengxiong/excalidash-frontend:latest
-    container_name: excalidash-frontend
+    image: ${EXCALIDASH_FRONTEND_IMAGE:-zimengxiong/excalidash-frontend}:${EXCALIDASH_IMAGE_TAG:-latest}
     ports:
-      - "6767:80"
+      - "${FRONTEND_PORT:-6767}:80"
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-backend:8000}
+      NGINX_CLIENT_MAX_BODY_SIZE: ${NGINX_CLIENT_MAX_BODY_SIZE:-250M}
+      NGINX_PROXY_CONNECT_TIMEOUT: ${NGINX_PROXY_CONNECT_TIMEOUT:-300s}
+      NGINX_PROXY_SEND_TIMEOUT: ${NGINX_PROXY_SEND_TIMEOUT:-300s}
+      NGINX_PROXY_READ_TIMEOUT: ${NGINX_PROXY_READ_TIMEOUT:-300s}
+      NGINX_WEBSOCKET_READ_TIMEOUT: ${NGINX_WEBSOCKET_READ_TIMEOUT:-3600s}
+      NGINX_WEBSOCKET_SEND_TIMEOUT: ${NGINX_WEBSOCKET_SEND_TIMEOUT:-3600s}
     depends_on:
       - backend
     networks:
