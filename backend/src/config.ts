@@ -410,6 +410,16 @@ const resolveMcpConfig = (): McpConfig => {
   if (!endpointPath.startsWith("/")) endpointPath = `/${endpointPath}`;
   endpointPath = endpointPath.replace(/\/+$/, "") || "/mcp";
 
+  const allowedLibraryUsageModes = new Set(["off", "curated", "required"]);
+  const libraryUsageMode = getOptionalEnv("MCP_LIBRARY_MODE", "curated")
+    .trim()
+    .toLowerCase();
+  if (!allowedLibraryUsageModes.has(libraryUsageMode)) {
+    throw new Error(
+      `Invalid MCP_LIBRARY_MODE: must be one of off, curated, required`,
+    );
+  }
+
   return {
     enabled: getOptionalBoolean("MCP_ENABLED", true),
     endpointPath,
@@ -419,6 +429,7 @@ const resolveMcpConfig = (): McpConfig => {
     maxElements: getRequiredEnvNumber("MCP_MAX_ELEMENTS", 5000),
     maxExportMb: getRequiredEnvNumber("MCP_MAX_EXPORT_MB", 100),
     defaultLibraryMode: libraryMode as McpConfig["defaultLibraryMode"],
+    libraryMode: libraryUsageMode as McpConfig["libraryMode"],
     publicSearchEnabled: getOptionalBoolean("MCP_PUBLIC_SEARCH_ENABLED", false),
     rateLimitWindowSeconds: getRequiredEnvNumber(
       "MCP_RATE_LIMIT_WINDOW_SECONDS",

@@ -13,7 +13,7 @@ import type {
 } from "../types";
 import { invalid } from "../errors";
 import { toScene } from "../excalidraw/elements";
-import { lintScene } from "../quality/lint";
+import { lintScene, type LintOptions } from "../quality/lint";
 import { scoreScene } from "../quality/score";
 import { repairScene } from "../quality/repair";
 import { autoPolish } from "../quality/autopolish";
@@ -32,6 +32,7 @@ import {
 } from "../architecture/patterns";
 import { buildGuide, guideToMarkdown } from "../guide";
 import { listSkills } from "../skills/registry";
+import { redactValue } from "../security/redaction";
 import type { DrawingService } from "../drawings/drawingService";
 import type { LibraryAdapter } from "../libraries/libraryAdapter";
 import type { LibrarySearchMode } from "../../libraries/types";
@@ -51,10 +52,15 @@ export interface McpTool {
   handler: (args: unknown, ctx: ToolContext) => Promise<ToolResult>;
 }
 
-const ok = (data: unknown): ToolResult => ({
-  content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-  structuredContent: data,
-});
+// Every tool response is redacted: secrets in user-supplied scenes/analysis/
+// labels must never appear in a tool result, log or transcript.
+const ok = (data: unknown): ToolResult => {
+  const safe = redactValue(data);
+  return {
+    content: [{ type: "text", text: JSON.stringify(safe, null, 2) }],
+    structuredContent: safe,
+  };
+};
 
 const sceneFields = {
   id: z.string().min(1).max(200).optional(),
@@ -125,6 +131,12 @@ const resolveGraph = async (
   return extractGraph(await resolveScene(args, ctx));
 };
 
+/** Lint overrides derived from config — only "required" mode enforces libraries. */
+const strictLintOptions = (config: McpConfig): Partial<LintOptions> =>
+  config.libraryMode === "required"
+    ? { requireLibrary: true, libraryRequiredSeverity: "error" }
+    : {};
+
 const polishAndMaybeSave = async (
   scene: ExcalidrawScene,
   args: {
@@ -137,18 +149,20 @@ const polishAndMaybeSave = async (
   },
   ctx: ToolContext,
 ) => {
+  const lintOverrides = strictLintOptions(ctx.config);
   let finalScene = scene;
   let polish: ReturnType<typeof autoPolish> | null = null;
   if (args.autoPolish !== false) {
     polish = autoPolish(scene, {
       minimumScore: ctx.config.minDrawingScore,
       maxAttempts: ctx.config.maxRepairAttempts,
+      lintOptions: lintOverrides,
     });
     finalScene = polish.scene;
   }
   const score = polish
     ? polish.score
-    : scoreScene(finalScene, ctx.config.minDrawingScore);
+    : scoreScene(finalScene, ctx.config.minDrawingScore, lintOverrides);
 
   let saved: { drawingId: string; editUrl: string | null } | null = null;
   const allowDraft = args.allowDraft ?? ctx.config.allowLowScoreDraft;
@@ -496,6 +510,21 @@ export const buildToolRegistry = (): McpTool[] => {
       indexes: z.array(z.number().int().nonnegative()).optional(),
       position: z.object({ x: z.number(), y: z.number() }).optional(),
       limit: z.number().int().positive().max(50).optional(),
+      placement: z
+        .enum([
+          "grid",
+          "inside-card-left",
+          "inside-card-top",
+          "badge",
+          "legend",
+          "actor",
+          "database-symbol",
+          "cloud-provider",
+          "external-integration-card",
+        ])
+        .optional(),
+      targetCardId: z.string().optional(),
+      slotSize: z.number().int().positive().max(400).optional(),
       save: z.boolean().optional(),
     }),
     async (raw, ctx) => addLibraryItemsHandler(raw, ctx, false),
@@ -513,28 +542,69 @@ export const buildToolRegistry = (): McpTool[] => {
       indexes: z.array(z.number().int().nonnegative()).optional(),
       position: z.object({ x: z.number(), y: z.number() }).optional(),
       limit: z.number().int().positive().max(50).optional(),
+      placement: z
+        .enum([
+          "grid",
+          "inside-card-left",
+          "inside-card-top",
+          "badge",
+          "legend",
+          "actor",
+          "database-symbol",
+          "cloud-provider",
+          "external-integration-card",
+        ])
+        .optional(),
+      targetCardId: z.string().optional(),
+      slotSize: z.number().int().positive().max(400).optional(),
       save: z.boolean().optional(),
     }),
     async (raw, ctx) => addLibraryItemsHandler(raw, ctx, true),
   );
 
   // ---- Quality / geometry (4) ------------------------------------------
+  const lintFlagFields = {
+    requireLibrary: z.boolean().optional(),
+    requireLegend: z.boolean().optional(),
+    expectRichArchitecture: z.boolean().optional(),
+  };
+  const lintOverridesFrom = (
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Partial<LintOptions> => ({
+    ...strictLintOptions(ctx.config),
+    ...(args.requireLibrary !== undefined
+      ? {
+          requireLibrary: Boolean(args.requireLibrary),
+          libraryRequiredSeverity: "error" as const,
+        }
+      : {}),
+    ...(args.requireLegend !== undefined
+      ? { requireLegend: Boolean(args.requireLegend) }
+      : {}),
+    ...(args.expectRichArchitecture !== undefined
+      ? { expectRichArchitecture: Boolean(args.expectRichArchitecture) }
+      : {}),
+  });
+
   tool(
     "lint_drawing",
-    "Detect visual, structural and mathematical issues in a scene using the geometry engine.",
-    z.object(sceneFields),
+    "Detect visual, structural and mathematical issues in a scene using the geometry engine (arrow-over-text, frame-title overlaps, density, etc.).",
+    z.object({ ...sceneFields, ...lintFlagFields }),
     async (raw, ctx) => {
-      const scene = await resolveScene(raw as never, ctx);
-      const issues = lintScene(scene);
+      const args = raw as Record<string, unknown>;
+      const scene = await resolveScene(args, ctx);
+      const issues = lintScene(scene, lintOverridesFrom(args, ctx));
       return ok({ issueCount: issues.length, issues });
     },
   );
 
   tool(
     "score_drawing",
-    "Score overall quality 0-100 with a per-dimension breakdown and repair suggestions (default minimum 95).",
+    "Score overall quality 0-100 with hard blockers, mathematical evidence, a per-dimension breakdown and an ordered repair plan (default minimum 95).",
     z.object({
       ...sceneFields,
+      ...lintFlagFields,
       minimumScore: z.number().int().min(0).max(100).optional(),
     }),
     async (raw, ctx) => {
@@ -543,6 +613,7 @@ export const buildToolRegistry = (): McpTool[] => {
       const result = scoreScene(
         scene,
         (args.minimumScore as number) ?? ctx.config.minDrawingScore,
+        lintOverridesFrom(args, ctx),
       );
       return ok(result);
     },
@@ -854,23 +925,34 @@ async function addLibraryItemsHandler(
       ? coerceScene(args, ctx.config.maxElements)
       : toScene([]);
 
+  const scoreBefore = scoreScene(scene, ctx.config.minDrawingScore).score;
+
   const result = await ctx.libraryAdapter.addItems({
     scene,
     libraryId: args.libraryId as string,
     itemNames: args.itemNames as string[] | undefined,
     indexes: args.indexes as number[] | undefined,
     position: args.position as { x: number; y: number } | undefined,
+    placement: args.placement as never,
+    targetCardId: args.targetCardId as string | undefined,
+    slotSize: args.slotSize as number | undefined,
     limit: args.limit as number | undefined,
     normalize,
     minFontSize: 16,
   });
 
+  const scoreAfter = scoreScene(result.scene, ctx.config.minDrawingScore).score;
+
+  // Score simulation: in normalized mode, reject items that make it worse.
+  const rejected = normalize && scoreAfter < scoreBefore;
+  const finalScene = rejected ? scene : result.scene;
+
   let saved: { drawingId: string; editUrl: string | null } | null = null;
-  if (args.save && args.id) {
+  if (args.save && args.id && !rejected) {
     const summary = await ctx.drawingService.updateDrawing(
       ctx.principal.userId,
       args.id as string,
-      { scene: result.scene, createVersion: true },
+      { scene: finalScene, createVersion: true },
     );
     const url = await ctx.drawingService.getDrawingUrl(
       ctx.principal.userId,
@@ -880,11 +962,20 @@ async function addLibraryItemsHandler(
   }
 
   return ok({
-    addedItems: result.addedItems,
-    addedElements: result.addedElements,
-    elementCount: result.scene.elements.length,
+    accepted: !rejected,
+    rejectedReason: rejected
+      ? `Items lowered the score (${scoreBefore} → ${scoreAfter}); kept the original scene. Try a different item or placement.`
+      : undefined,
+    addedItems: rejected ? 0 : result.addedItems,
+    addedElements: rejected ? 0 : result.addedElements,
+    elementCount: finalScene.elements.length,
     normalized: normalize,
-    scene: result.scene,
+    placement: (args.placement as string) ?? "grid",
+    librariesUsed: rejected ? [] : result.librariesUsed,
+    itemsUsed: rejected ? [] : result.items,
+    scoreBefore,
+    scoreAfter: rejected ? scoreBefore : scoreAfter,
+    scene: finalScene,
     saved,
   });
 }

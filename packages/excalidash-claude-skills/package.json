@@ -1,0 +1,18 @@
+{
+  "name": "@excalidash/claude-skills",
+  "version": "0.1.0",
+  "description": "Installer that copies the ExcaliDash Claude Code skills into a Claude Code skills directory (user or project scope). Zero runtime dependencies.",
+  "license": "MIT",
+  "bin": {
+    "excalidash-skills": "./bin/install.cjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -16,6 +16,13 @@ export interface McpConfig {
   maxElements: number;
   maxExportMb: number;
   defaultLibraryMode: "curated" | "all" | "core" | "specialized" | "public";
+  /**
+   * How strictly library/icon usage is enforced in scoring:
+   *   off      — never flag missing library usage
+   *   curated  — recommend libraries (available via lint flags, not auto-enforced)
+   *   required — a rich diagram with no library/icon items is a hard blocker
+   */
+  libraryMode?: "off" | "curated" | "required";
   publicSearchEnabled: boolean;
   rateLimitWindowSeconds: number;
   rateLimitMax: number;
@@ -101,6 +108,33 @@ export interface LintIssue {
   dimension: QualityDimension;
   /** Whether `repair_drawing` can auto-fix this issue. */
   repairable: boolean;
+  /** Geometric measurements backing this issue (areas, ratios, distances). */
+  metrics?: Record<string, number>;
+}
+
+/**
+ * A mathematically-proven defect that caps the score below the passing bar
+ * regardless of how few other issues exist (e.g. an arrow over readable text).
+ */
+export interface HardBlocker {
+  type: string;
+  severity: "error";
+  elementIds: string[];
+  /** Convenience pointers when the blocker is an arrow-over-text crossing. */
+  arrowId?: string;
+  textId?: string;
+  intersectionArea?: number;
+  message: string;
+  metrics?: Record<string, number>;
+}
+
+/** A single numeric receipt for the score (what was measured, vs. threshold). */
+export interface MathEvidenceItem {
+  code: string;
+  metric: string;
+  value: number;
+  threshold?: number;
+  elementIds: string[];
 }
 
 export type QualityDimension =
@@ -126,6 +160,12 @@ export interface DrawingScore {
   issues: LintIssue[];
   repairSuggestions: string[];
   breakdown: ScoreBreakdown[];
+  /** Defects that hard-cap the score below the passing bar. */
+  hardBlockers: HardBlocker[];
+  /** Numeric receipts (areas/ratios/distances) behind the score. */
+  mathematicalEvidence: MathEvidenceItem[];
+  /** Ordered, actionable plan to clear the issues. */
+  repairPlan: string[];
 }
 
 /** Authenticated MCP caller (resolved from the Bearer API key). */

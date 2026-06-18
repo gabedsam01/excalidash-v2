@@ -159,6 +159,32 @@ Relevant variables (see also `.env.example`):
 | `EXCALIDRAW_LIBRARIES_CATALOG_URL` | official catalog | catalog JSON URL (allowlisted host only) |
 | `EXCALIDRAW_LIBRARIES_BASE_URL` | official base | library file base URL (allowlisted host only) |
 
+## MCP server (`/mcp`)
+
+The MCP endpoint is mounted at `/mcp` and authenticated by Bearer `exd_` API
+keys. It exposes 25 tools and 25 prompts; 25 Claude Code skills install
+separately (`packages/excalidash-claude-skills`). Full reference and
+troubleshooting: [docs/mcp.md](mcp.md) and [docs/skills.md](skills.md).
+
+| Env var | Default | Notes |
+| --- | --- | --- |
+| `MCP_ENABLED` | `true` | turn the endpoint on/off |
+| `MCP_ENDPOINT_PATH` | `/mcp` | endpoint path |
+| `MCP_MIN_DRAWING_SCORE` | `95` | passing bar before saving as final |
+| `MCP_MAX_REPAIR_ATTEMPTS` | `5` | auto-polish loop cap |
+| `MCP_ALLOW_LOW_SCORE_DRAFT` | `true` | allow explicit below-bar drafts |
+| `MCP_MAX_ELEMENTS` | `5000` | max elements per scene |
+| `MCP_MAX_EXPORT_MB` | `100` | export size cap |
+| `MCP_DEFAULT_LIBRARY_MODE` | `curated` | which packs search returns |
+| `MCP_LIBRARY_MODE` | `curated` | `off`/`curated`/`required` usage enforcement |
+| `MCP_PUBLIC_SEARCH_ENABLED` | `false` | allow PUBLIC catalog search |
+| `MCP_RATE_LIMIT_MAX` / `MCP_RATE_LIMIT_WINDOW_SECONDS` | `300` / `900` | dedicated rate limit |
+| `MCP_VALIDATE_ORIGIN` | `true` | validate the `Origin` header for browser clients |
+
+Reverse-proxy notes: route `/mcp` to the **backend** (not the SPA) so clients
+don't receive HTML; it uses `POST` (a `GET` returns 405) and is exempt from
+cookie-CSRF (it is Bearer-authenticated, not cookie-authenticated).
+
 ## External Nginx
 
 ```nginx

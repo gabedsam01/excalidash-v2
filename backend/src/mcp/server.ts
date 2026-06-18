@@ -8,12 +8,14 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { sanitizeDrawingData } from "../security";
+import { redactDrawingData } from "./security/redaction";
 import { createLibraryServices } from "../libraries";
 import type { LibraryConfig, LibraryPrisma } from "../libraries/types";
 import type { McpConfig } from "./types";
 import { createDrawingService } from "./drawings/drawingService";
 import { createLibraryAdapter } from "./libraries/libraryAdapter";
 import { buildToolRegistry, type ToolContext } from "./registry/toolRegistry";
+import { buildPromptRegistry } from "./prompts/registry";
 import {
   createMcpAuthMiddleware,
   createMcpOriginMiddleware,
@@ -54,6 +56,7 @@ export const registerMcpServer = (
   const endpoint = mcp.endpointPath;
 
   const tools = buildToolRegistry();
+  const prompts = buildPromptRegistry();
   const serverInfo: ServerInfo = {
     name: "excalidash",
     version: serverVersion,
@@ -65,7 +68,9 @@ export const registerMcpServer = (
     maxElements: mcp.maxElements,
     sanitizeScene: (data) =>
       sanitizeDrawingData(
-        data as Parameters<typeof sanitizeDrawingData>[0],
+        redactDrawingData(
+          data as Parameters<typeof sanitizeDrawingData>[0],
+        ),
       ) as ReturnType<
         Parameters<typeof createDrawingService>[0]["sanitizeScene"]
       >,
@@ -148,7 +153,7 @@ export const registerMcpServer = (
         if (Array.isArray(body)) {
           const responses = (
             await Promise.all(
-              body.map((m) => handleMcpMessage(m, ctx, tools, serverInfo)),
+              body.map((m) => handleMcpMessage(m, ctx, tools, serverInfo, prompts)),
             )
           ).filter((r) => r !== undefined);
           if (responses.length === 0) {
@@ -158,7 +163,7 @@ export const registerMcpServer = (
           res.json(responses);
           return;
         }
-        const response = await handleMcpMessage(body, ctx, tools, serverInfo);
+        const response = await handleMcpMessage(body, ctx, tools, serverInfo, prompts);
         if (response === undefined) {
           res.status(202).end();
           return;

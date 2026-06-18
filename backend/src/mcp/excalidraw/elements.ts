@@ -304,6 +304,64 @@ export class SceneBuilder {
     return element;
   }
 
+  /**
+   * Add an orthogonally-routed arrow through explicit absolute waypoints (used
+   * for connector gutters / side-lanes so long edges never cross cards or text).
+   */
+  routedConnector(
+    options: {
+      points: Array<[number, number]>;
+      startElement?: ExcalidrawElement;
+      endElement?: ExcalidrawElement;
+      strokeColor?: string;
+      strokeWidth?: number;
+      strokeStyle?: string;
+      roughness?: number;
+      endArrowhead?: string | null;
+    },
+  ): ExcalidrawElement {
+    const pts = options.points;
+    const minX = Math.min(...pts.map((p) => p[0]));
+    const minY = Math.min(...pts.map((p) => p[1]));
+    const maxX = Math.max(...pts.map((p) => p[0]));
+    const maxY = Math.max(...pts.map((p) => p[1]));
+    const element = this.base("arrow", {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      strokeColor: options.strokeColor ?? "#1e1e1e",
+      strokeWidth: options.strokeWidth ?? 2,
+      strokeStyle: options.strokeStyle ?? "solid",
+      roughness: options.roughness ?? 1,
+      roundness: { type: 2 },
+      points: pts.map((p): [number, number] => [p[0] - minX, p[1] - minY]),
+      lastCommittedPoint: null,
+      startArrowhead: null,
+      endArrowhead: options.endArrowhead ?? "arrow",
+      startBinding: options.startElement
+        ? { elementId: options.startElement.id, focus: 0, gap: 4 }
+        : null,
+      endBinding: options.endElement
+        ? { elementId: options.endElement.id, focus: 0, gap: 4 }
+        : null,
+    });
+    this.elements.push(element);
+    if (options.startElement) {
+      options.startElement.boundElements = [
+        ...(options.startElement.boundElements ?? []),
+        { id: element.id, type: "arrow" },
+      ];
+    }
+    if (options.endElement) {
+      options.endElement.boundElements = [
+        ...(options.endElement.boundElements ?? []),
+        { id: element.id, type: "arrow" },
+      ];
+    }
+    return element;
+  }
+
   /** Add a frame (group container with a title). */
   frame(options: {
     x: number;

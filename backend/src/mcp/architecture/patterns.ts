@@ -8,7 +8,14 @@ import {
   type GraphEdge,
   type GraphNode,
 } from "../layout/graphLayout";
+import {
+  layoutBands,
+  type Band,
+  type BandCard,
+  type BandEdge,
+} from "../layout/bandLayout";
 import { getPreset } from "../templates/presets";
+import { redactString } from "../security/redaction";
 import { validateArchitecture } from "./validator";
 
 const n = (id: string, label: string, group?: string): GraphNode => ({
@@ -288,80 +295,197 @@ export const suggestImprovements = (
   return { suggestions: unique, validation };
 };
 
+/** A permissive entry: a bare label or an object with a name/label/kind. */
+type RepoEntry = string | { name?: string; label?: string; kind?: string };
+
+/**
+ * Rich repository-analysis model. Every field is optional and permissive so a
+ * large external scan never crashes the tool — unknown shapes are tolerated and
+ * synonyms are merged. Secrets in any label are redacted before drawing.
+ */
 export interface RepoAnalysis {
   name?: string;
-  entrypoints?: string[];
-  modules?: Array<{ name: string; layer?: string } | string>;
-  services?: string[];
-  database?: string[];
-  integrations?: string[];
-  boundaries?: string[];
+  actors?: RepoEntry[];
+  users?: RepoEntry[];
+  apps?: RepoEntry[];
+  frontends?: RepoEntry[];
+  frontend?: RepoEntry[];
+  gateways?: RepoEntry[];
+  gateway?: RepoEntry[];
+  entrypoints?: RepoEntry[];
+  services?: RepoEntry[];
+  modules?: RepoEntry[];
+  workers?: RepoEntry[];
+  queues?: RepoEntry[];
+  databases?: RepoEntry[];
+  database?: RepoEntry[];
+  integrations?: RepoEntry[];
+  external?: RepoEntry[];
+  externalIntegrations?: RepoEntry[];
+  auth?: RepoEntry[];
+  security?: RepoEntry[];
+  boundaries?: RepoEntry[];
+  observability?: RepoEntry[];
+  risks?: RepoEntry[];
+  flows?: Array<{ from?: string; to?: string; label?: string; async?: boolean }>;
+  [key: string]: unknown;
 }
 
-const moduleName = (m: { name: string } | string): string =>
-  typeof m === "string" ? m : m.name;
+const asArray = (v: unknown): RepoEntry[] =>
+  Array.isArray(v) ? (v as RepoEntry[]) : v == null ? [] : [v as RepoEntry];
+
+const entryLabel = (e: RepoEntry): string => {
+  const raw =
+    typeof e === "string"
+      ? e
+      : String(e?.name ?? e?.label ?? "Item");
+  return redactString(raw).slice(0, 48).trim() || "Item";
+};
+
+const slugify = (s: string): string =>
+  s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "x";
+
+interface ZoneSpec {
+  id: string;
+  title: string;
+  sources: Array<keyof RepoAnalysis>;
+}
+
+const ZONE_SPECS: ZoneSpec[] = [
+  { id: "actors", title: "Actors & Users", sources: ["actors", "users"] },
+  {
+    id: "apps",
+    title: "Client Apps & Frontends",
+    sources: ["apps", "frontends", "frontend"],
+  },
+  {
+    id: "edge",
+    title: "Edge, Gateway & Auth",
+    sources: ["gateways", "gateway", "auth", "security", "boundaries", "entrypoints"],
+  },
+  {
+    id: "services",
+    title: "Services & API",
+    sources: ["services", "modules"],
+  },
+  { id: "data", title: "Data Stores", sources: ["databases", "database"] },
+  { id: "async", title: "Async, Queues & Workers", sources: ["queues", "workers"] },
+  {
+    id: "external",
+    title: "External Integrations",
+    sources: ["integrations", "external", "externalIntegrations"],
+  },
+  { id: "observability", title: "Observability", sources: ["observability"] },
+];
 
 export const buildFromRepoAnalysis = (
   analysis: RepoAnalysis,
   presetId?: string,
 ): ExcalidrawScene => {
   const preset = getPreset(presetId);
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-  const ids = new Set<string>();
-  const add = (id: string, label: string, group?: string) => {
-    if (ids.has(id)) return id;
-    ids.add(id);
-    nodes.push({ id, label, group });
+  const usedIds = new Set<string>();
+  const mkId = (zoneId: string, label: string): string => {
+    let id = `${zoneId}_${slugify(label)}`;
+    let n = 1;
+    while (usedIds.has(id)) id = `${zoneId}_${slugify(label)}_${n++}`;
+    usedIds.add(id);
     return id;
   };
-  const slug = (s: string, prefix: string) =>
-    `${prefix}_${s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
 
-  const entryIds = (analysis.entrypoints ?? []).map((label) =>
-    add(slug(label, "entry"), label, "entry"),
-  );
-  const serviceLabels = [
-    ...(analysis.services ?? []),
-    ...((analysis.modules ?? []).map(moduleName)),
-  ];
-  const serviceIds = serviceLabels.map((label) =>
-    add(slug(label, "svc"), label, "service"),
-  );
-  const dbIds = (analysis.database ?? []).map((label) =>
-    add(slug(label, "db"), label, "data"),
-  );
-  const intIds = (analysis.integrations ?? []).map((label) =>
-    add(slug(label, "ext"), label, "external"),
-  );
-
-  if (entryIds.length === 0 && serviceIds.length > 0) {
-    entryIds.push(add("entry_client", "Client", "entry"));
-  }
-
-  for (const entry of entryIds) {
-    for (const svc of serviceIds.slice(0, Math.max(1, serviceIds.length))) {
-      edges.push({ from: entry, to: svc });
+  const MAX_PER_ZONE = 8;
+  const bands: Band[] = ZONE_SPECS.map((spec) => {
+    const labels: string[] = [];
+    for (const src of spec.sources) {
+      for (const e of asArray(analysis[src])) {
+        const label = entryLabel(e);
+        if (label && !labels.includes(label)) labels.push(label);
+      }
     }
-    if (serviceIds.length === 0) {
-      for (const db of dbIds) edges.push({ from: entry, to: db });
+    const truncated = labels.slice(0, MAX_PER_ZONE);
+    return {
+      id: spec.id,
+      title: spec.title,
+      cards: truncated.map((label) => ({ id: mkId(spec.id, label), label })),
+    };
+  });
+
+  const cardsOf = (zoneId: string): BandCard[] =>
+    bands.find((b) => b.id === zoneId)?.cards ?? [];
+  const lead = (zoneId: string): BandCard | undefined => cardsOf(zoneId)[0];
+  const edges: BandEdge[] = [];
+  const connectEach = (from: BandCard[], to?: BandCard, style?: "dashed") => {
+    if (!to) return;
+    for (const f of from) edges.push({ from: f.id, to: to.id, style });
+  };
+  const fanOut = (from: BandCard | undefined, to: BandCard[], style?: "dashed") => {
+    if (!from) return;
+    for (const t of to) edges.push({ from: from.id, to: t.id, style });
+  };
+
+  // Canonical request pipeline (kept sparse so the diagram stays readable).
+  connectEach(cardsOf("actors"), lead("apps") ?? lead("edge") ?? lead("services"));
+  connectEach(cardsOf("apps"), lead("edge") ?? lead("services"));
+  fanOut(lead("edge"), cardsOf("services"));
+  connectEach(cardsOf("services"), lead("data"));
+  edges.push(
+    ...maybeEdge(lead("services"), lead("async"), "dashed"),
+    ...maybeEdge(lead("async"), lead("data"), "dashed"),
+    ...maybeEdge(lead("services"), lead("external"), "dashed"),
+    ...maybeEdge(lead("services"), lead("observability"), "dashed"),
+    ...maybeEdge(lead("data"), lead("observability"), "dashed"),
+  );
+
+  // Explicit flows from the analysis, matched to cards by label slug.
+  const bySlug = new Map<string, BandCard>();
+  for (const band of bands)
+    for (const c of band.cards) bySlug.set(slugify(c.label), c);
+  for (const flow of analysis.flows ?? []) {
+    const from = flow.from ? bySlug.get(slugify(redactString(flow.from))) : undefined;
+    const to = flow.to ? bySlug.get(slugify(redactString(flow.to))) : undefined;
+    if (from && to && from.id !== to.id) {
+      edges.push({
+        from: from.id,
+        to: to.id,
+        label: flow.label ? redactString(flow.label).slice(0, 32) : undefined,
+        style: flow.async ? "dashed" : "solid",
+      });
     }
   }
-  for (const svc of serviceIds) {
-    for (const db of dbIds) edges.push({ from: svc, to: db });
-    for (const ext of intIds) edges.push({ from: svc, to: ext });
+
+  // Fallback: never produce an empty scene.
+  if (bands.every((b) => b.cards.length === 0)) {
+    bands[3].cards.push({ id: "system", label: redactString(analysis.name ?? "System") });
   }
 
-  if (nodes.length === 0) {
-    add("system", analysis.name ?? "System", "system");
-  }
+  const legend: Array<{ label: string; color?: string }> = bands
+    .filter((b) => b.cards.length > 0)
+    .map((b, i) => ({ label: b.title, color: preset.palette[i % preset.palette.length] }));
+  legend.push({ label: "Dashed = async / external / telemetry" });
 
-  return layoutGraph(nodes, edges, {
+  const notes = asArray(analysis.risks).map(entryLabel).slice(0, 6);
+
+  return layoutBands(bands, edges, {
     preset,
-    title: analysis.name ? `${analysis.name} — Architecture` : "Repository Architecture",
-    direction: "TB",
+    title: analysis.name
+      ? `${redactString(analysis.name).slice(0, 60)} — Architecture`
+      : "Repository Architecture",
+    legend,
+    notes,
   });
 };
+
+const maybeEdge = (
+  from: BandCard | undefined,
+  to: BandCard | undefined,
+  style?: "dashed",
+): BandEdge[] =>
+  from && to && from.id !== to.id
+    ? [{ from: from.id, to: to.id, style }]
+    : [];
 
 export const convertDiagram = (
   nodes: GraphNode[],

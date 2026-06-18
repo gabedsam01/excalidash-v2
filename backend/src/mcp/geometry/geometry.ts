@@ -144,6 +144,132 @@ export const pointInBBox = (
   point[1] >= box.minY - padding &&
   point[1] <= box.maxY + padding;
 
+export type Segment = [[number, number], [number, number]];
+
+/** Absolute line segments of a linear element (arrow/line polyline). */
+export const linearSegments = (el: ExcalidrawElement): Segment[] => {
+  if (!isLinear(el) || !Array.isArray(el.points) || el.points.length < 2) {
+    return [];
+  }
+  const x = num(el.x);
+  const y = num(el.y);
+  const pts = el.points.map(
+    (p): [number, number] => [x + num(p[0]), y + num(p[1])],
+  );
+  const segments: Segment[] = [];
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    segments.push([pts[i], pts[i + 1]]);
+  }
+  return segments;
+};
+
+/**
+ * Length of the part of segment a→b that lies inside `box`, via Liang–Barsky
+ * parametric clipping. 0 if the segment never enters the box. This is the honest
+ * geometric primitive behind ARROW_TEXT_INTERSECTION (we measure the real
+ * overlap of the arrow's line with the readable text rectangle, not bboxes).
+ */
+export const segmentRectClipLength = (
+  a: [number, number],
+  b: [number, number],
+  box: BBox,
+): number => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  if (dx === 0 && dy === 0) {
+    return pointInBBox(a, box) ? 0 : 0;
+  }
+  let t0 = 0;
+  let t1 = 1;
+  const p = [-dx, dx, -dy, dy];
+  const q = [a[0] - box.minX, box.maxX - a[0], a[1] - box.minY, box.maxY - a[1]];
+  for (let i = 0; i < 4; i += 1) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return 0; // parallel and outside this edge
+    } else {
+      const r = q[i] / p[i];
+      if (p[i] < 0) {
+        if (r > t1) return 0;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return 0;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  if (t1 < t0) return 0;
+  const len = Math.hypot(dx, dy);
+  return Math.max(0, (t1 - t0) * len);
+};
+
+/** Does any segment of a linear element pass through `box` (length > min)? */
+export const linearCrossesRect = (
+  el: ExcalidrawElement,
+  box: BBox,
+  minLength = 1,
+): number => {
+  let max = 0;
+  for (const [a, b] of linearSegments(el)) {
+    max = Math.max(max, segmentRectClipLength(a, b, box));
+  }
+  return max >= minLength ? max : 0;
+};
+
+/** Perpendicular distance from a point to a segment. */
+export const pointSegmentDistance = (
+  point: [number, number],
+  a: [number, number],
+  b: [number, number],
+): number => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(point[0] - a[0], point[1] - a[1]);
+  let t = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(point[0] - (a[0] + t * dx), point[1] - (a[1] + t * dy));
+};
+
+/** Do two segments properly intersect (used to count arrow crossings)? */
+export const segmentsIntersect = (
+  p1: [number, number],
+  p2: [number, number],
+  p3: [number, number],
+  p4: [number, number],
+): boolean => {
+  const o = (
+    a: [number, number],
+    b: [number, number],
+    c: [number, number],
+  ): number => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const d1 = o(p3, p4, p1);
+  const d2 = o(p3, p4, p2);
+  const d3 = o(p1, p2, p3);
+  const d4 = o(p1, p2, p4);
+  return (
+    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  );
+};
+
+/**
+ * The rectangle reserved at the top of a frame for its title. Content must not
+ * intrude here (FRAME_TITLE_OVERLAP). Excalidraw draws frame names just above
+ * the frame; we reserve an inner band too so generated content leaves room.
+ */
+export const frameTitleBand = (
+  frame: ExcalidrawElement,
+  bandHeight = 40,
+): BBox => {
+  const box = elementBBox(frame);
+  return {
+    minX: box.minX,
+    minY: box.minY,
+    maxX: box.maxX,
+    maxY: box.minY + Math.min(bandHeight, Math.max(0, bboxHeight(box))),
+  };
+};
+
 /**
  * Density of elements per region: returns the maximum count of element centers
  * that fall within any single cell of a regular grid over the scene.

@@ -10,7 +10,14 @@ import type { ExcalidrawElement, ExcalidrawScene } from "../types";
 import { notFound, invalid } from "../errors";
 import { resolveCachePath, safeJsonParse } from "../../libraries/validators";
 import { unionBBox, snapToGrid } from "../geometry/geometry";
-import { measureText } from "../excalidraw/elements";
+import {
+  cardBoxById,
+  fitElementsInto,
+  normalizeElements,
+  slotForPlacement,
+  tagItemElements,
+  type Placement,
+} from "./placement";
 import type { CatalogService } from "../../libraries/catalogService";
 import type { DownloadService } from "../../libraries/downloadService";
 import type { LibrarySearchMode } from "../../libraries/types";
@@ -174,31 +181,13 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     });
   };
 
-  const normalizeElements = (
-    elements: ExcalidrawElement[],
-    opts: { grid: number; minFontSize: number },
-  ): ExcalidrawElement[] =>
-    elements.map((original) => {
-      const el: ExcalidrawElement = { ...original };
-      if (typeof el.x === "number") el.x = snapToGrid(el.x, opts.grid);
-      if (typeof el.y === "number") el.y = snapToGrid(el.y, opts.grid);
-      if (el.type === "text") {
-        const fontSize = typeof el.fontSize === "number" ? el.fontSize : 20;
-        if (fontSize < opts.minFontSize) {
-          el.fontSize = opts.minFontSize;
-          const metrics = measureText(
-            String(el.text ?? ""),
-            opts.minFontSize,
-            typeof el.fontFamily === "number" ? el.fontFamily : 2,
-          );
-          el.width = metrics.width;
-          el.height = metrics.height;
-        }
-      }
-      return el;
-    });
-
-  /** Add selected library items onto a scene at a target position. */
+  /**
+   * Add selected library items onto a scene. With normalization + a placement,
+   * items are scaled/snapped and dropped into reserved icon slots (inside a
+   * card, as a badge, as an actor/database/cloud symbol) instead of tiled
+   * randomly. Every placed element is tagged with provenance metadata so the
+   * scene reports real library usage.
+   */
   const addItems = async (params: {
     scene: ExcalidrawScene;
     libraryId: string;
@@ -210,7 +199,18 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     normalize?: boolean;
     grid?: number;
     minFontSize?: number;
-  }): Promise<{ scene: ExcalidrawScene; addedItems: number; addedElements: number }> => {
+    placement?: Placement;
+    targetCardId?: string;
+    slotSize?: number;
+    frameId?: string | null;
+    strokeColor?: string;
+  }): Promise<{
+    scene: ExcalidrawScene;
+    addedItems: number;
+    addedElements: number;
+    items: Array<{ name: string; placement: Placement }>;
+    librariesUsed: string[];
+  }> => {
     const documents = await getDocument(params.libraryId);
     const chosen = selectItems(documents, {
       itemNames: params.itemNames,
@@ -224,35 +224,73 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     const grid = params.grid ?? 20;
     const spacing = params.spacing ?? 40;
     const base = params.position ?? { x: 0, y: 0 };
+    const placement: Placement = params.placement ?? "grid";
+    const slotSize = params.slotSize ?? 28;
     const perRow = 4;
     const cellW = 220;
     const cellH = 200;
 
-    let added: ExcalidrawElement[] = [];
-    chosen.forEach((item, index) => {
-      const col = index % perRow;
-      const row = Math.floor(index / perRow);
-      const offset = {
-        x: snapToGrid(base.x + col * (cellW + spacing), grid),
-        y: snapToGrid(base.y + row * (cellH + spacing), grid),
-      };
-      added.push(
-        ...placeItem(item, offset, `grp_${nextId()}`, nextId),
-      );
-    });
+    const cardBox =
+      params.targetCardId != null
+        ? cardBoxById(params.scene.elements, params.targetCardId)
+        : null;
+    const isSlot =
+      cardBox != null &&
+      (placement === "inside-card-left" ||
+        placement === "inside-card-top" ||
+        placement === "badge");
 
-    if (params.normalize) {
-      added = normalizeElements(added, {
-        grid,
-        minFontSize: params.minFontSize ?? 16,
+    const added: ExcalidrawElement[] = [];
+    const items: Array<{ name: string; placement: Placement }> = [];
+
+    chosen.forEach((item, index) => {
+      const groupId = `grp_${nextId()}`;
+      let els: ExcalidrawElement[];
+      let used: Placement;
+      if (isSlot && index === 0) {
+        els = placeItem(item, { x: 0, y: 0 }, groupId, nextId);
+        els = fitElementsInto(els, slotForPlacement(cardBox!, placement, slotSize));
+        used = placement;
+      } else {
+        const col = index % perRow;
+        const row = Math.floor(index / perRow);
+        const offset = {
+          x: snapToGrid(base.x + col * (cellW + spacing), grid),
+          y: snapToGrid(base.y + row * (cellH + spacing), grid),
+        };
+        els = placeItem(item, offset, groupId, nextId);
+        used = isSlot ? "grid" : placement;
+      }
+      if (params.frameId != null) {
+        els = els.map((e) => ({ ...e, frameId: params.frameId ?? null }));
+      }
+      els = tagItemElements(els, {
+        library: params.libraryId,
+        item: item.name,
+        placement: used,
       });
-    }
+      if (params.normalize) {
+        els = normalizeElements(els, {
+          grid,
+          minFontSize: params.minFontSize ?? 16,
+          strokeColor: params.strokeColor,
+        });
+      }
+      added.push(...els);
+      items.push({ name: item.name, placement: used });
+    });
 
     const scene: ExcalidrawScene = {
       ...params.scene,
       elements: [...params.scene.elements, ...added],
     };
-    return { scene, addedItems: chosen.length, addedElements: added.length };
+    return {
+      scene,
+      addedItems: chosen.length,
+      addedElements: added.length,
+      items,
+      librariesUsed: [params.libraryId],
+    };
   };
 
   return { search, inspect, cache, getDocument, addItems };

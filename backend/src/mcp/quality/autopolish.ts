@@ -33,16 +33,19 @@ export const autoPolish = (
   options: AutoPolishOptions,
 ): AutoPolishResult => {
   const { minimumScore, maxAttempts, lintOptions = {} } = options;
-  let current = scene;
-  let result = scoreScene(current, minimumScore, lintOptions);
+  // Keep the BEST scene seen so far ("snapshot"). A repair pass that does not
+  // strictly improve the score is discarded (rollback) and the loop stops —
+  // guaranteeing auto-polish never returns a worse scene than its input.
+  let best = scene;
+  let bestResult = scoreScene(best, minimumScore, lintOptions);
   const history: AutoPolishStep[] = [
-    { attempt: 0, score: result.score, issues: result.issues.length },
+    { attempt: 0, score: bestResult.score, issues: bestResult.issues.length },
   ];
 
   let attempts = 0;
-  while (!result.passed && attempts < maxAttempts) {
+  while (!bestResult.passed && attempts < maxAttempts) {
     attempts += 1;
-    const repaired = repairScene(current, lintOptions);
+    const repaired = repairScene(best, lintOptions);
     const nextResult = scoreScene(repaired.scene, minimumScore, lintOptions);
     history.push({
       attempt: attempts,
@@ -50,23 +53,19 @@ export const autoPolish = (
       issues: nextResult.issues.length,
       applied: repaired.applied,
     });
-    // Stop early if a pass made no progress (avoid spinning).
-    if (
-      nextResult.score <= result.score &&
-      repaired.applied.length === 0
-    ) {
-      current = repaired.scene;
-      result = nextResult;
+    if (nextResult.score > bestResult.score) {
+      best = repaired.scene;
+      bestResult = nextResult;
+    } else {
+      // No improvement (or a regression): roll back to the snapshot and stop.
       break;
     }
-    current = repaired.scene;
-    result = nextResult;
   }
 
   return {
-    scene: current,
-    score: result,
-    passed: result.passed,
+    scene: best,
+    score: bestResult,
+    passed: bestResult.passed,
     attempts,
     history,
   };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handleMcpMessage } from "./jsonRpc";
 import { buildToolRegistry, type ToolContext } from "../registry/toolRegistry";
+import { buildPromptRegistry } from "../prompts/registry";
 import type { McpConfig } from "../types";
 
 const config: McpConfig = {
@@ -28,8 +29,9 @@ const ctx = {
   libraryAdapter: {} as never,
 } as ToolContext;
 
+const prompts = buildPromptRegistry();
 const call = (message: Record<string, unknown>) =>
-  handleMcpMessage(message, ctx, tools, serverInfo);
+  handleMcpMessage(message, ctx, tools, serverInfo, prompts);
 
 describe("MCP JSON-RPC transport", () => {
   it("handles initialize and echoes the protocol version", async () => {
@@ -54,6 +56,38 @@ describe("MCP JSON-RPC transport", () => {
       expect(t.name).toBeTruthy();
       expect(t.inputSchema.type).toBe("object");
     }
+  });
+
+  it("advertises the prompts capability on initialize", async () => {
+    const res = await call({ jsonrpc: "2.0", id: 20, method: "initialize", params: {} });
+    const result = (res as { result: any }).result;
+    expect(result.capabilities.prompts).toBeTruthy();
+  });
+
+  it("lists exactly 25 prompts", async () => {
+    const res = await call({ jsonrpc: "2.0", id: 21, method: "prompts/list" });
+    const result = (res as { result: any }).result;
+    expect(result.prompts).toHaveLength(25);
+    for (const p of result.prompts) {
+      expect(p.name).toMatch(/^excalidash_/);
+      expect(Array.isArray(p.arguments)).toBe(true);
+    }
+  });
+
+  it("renders a prompt via prompts/get", async () => {
+    const res = await call({
+      jsonrpc: "2.0", id: 22, method: "prompts/get",
+      params: { name: "excalidash_diagram_director", arguments: { subject: "my repo" } },
+    });
+    const result = (res as { result: any }).result;
+    expect(result.messages[0].content.text).toContain("my repo");
+  });
+
+  it("returns -32602 for an unknown prompt", async () => {
+    const res = await call({
+      jsonrpc: "2.0", id: 23, method: "prompts/get", params: { name: "nope" },
+    });
+    expect((res as { error: any }).error.code).toBe(-32602);
   });
 
   it("calls read_mcp_guide", async () => {

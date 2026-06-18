@@ -185,43 +185,132 @@ export const layoutGraph = (
     });
   }
 
-  // Edges (bound arrows).
+  // ----- Edges: route cleanly; keep labels OFF the arrow path. -----
   const ids = new Set(nodes.map((n) => n.id));
+  const cards = builder.elements.filter(
+    (el) => el.type !== "text" && el.type !== "arrow" && el.type !== "frame",
+  );
+  const bounds = cards.reduce(
+    (acc, el) => ({
+      minX: Math.min(acc.minX, el.x),
+      minY: Math.min(acc.minY, el.y),
+      maxX: Math.max(acc.maxX, el.x + el.width),
+      maxY: Math.max(acc.maxY, el.y + el.height),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
+  const laneGap = Math.max(32, Math.round(preset.spacingX / 2));
+  let laneIndex = 0;
+
+  // Place a free edge-label perpendicular to (and clear of) the arrow segment.
+  const placeEdgeLabel = (
+    a: [number, number],
+    b: [number, number],
+    label: string,
+  ): void => {
+    const metrics = measureText(label, preset.minFontSize, preset.fontFamily);
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len;
+    const py = dx / len;
+    const offset =
+      10 + (Math.abs(px) * metrics.width + Math.abs(py) * metrics.height) / 2;
+    const cx = (a[0] + b[0]) / 2 + px * offset;
+    const cy = (a[1] + b[1]) / 2 + py * offset;
+    builder.text({
+      x: snapToGrid(cx - metrics.width / 2, preset.grid),
+      y: snapToGrid(cy - metrics.height / 2, preset.grid),
+      text: label,
+      fontSize: preset.minFontSize,
+      fontFamily: preset.fontFamily,
+      strokeColor: preset.textColor,
+      textAlign: "center",
+    });
+  };
+
   for (const edge of edges) {
     if (!ids.has(edge.from) || !ids.has(edge.to)) continue;
     const source = elementByNode.get(edge.from);
     const target = elementByNode.get(edge.to);
     if (!source || !target) continue;
-    const start: [number, number] =
-      direction === "TB"
-        ? [source.x + source.width / 2, source.y + source.height]
-        : [source.x + source.width, source.y + source.height / 2];
-    const end: [number, number] =
-      direction === "TB"
-        ? [target.x + target.width / 2, target.y]
-        : [target.x, target.y + target.height / 2];
-    builder.connector({
-      start,
-      end,
+    const sLayer = layerOf.get(edge.from) ?? 0;
+    const tLayer = layerOf.get(edge.to) ?? 0;
+    const style = edge.style ?? preset.arrowStyle;
+
+    // Adjacent forward edges go straight through the (clear) inter-layer gutter.
+    if (tLayer === sLayer + 1) {
+      const start: [number, number] =
+        direction === "TB"
+          ? [source.x + source.width / 2, source.y + source.height]
+          : [source.x + source.width, source.y + source.height / 2];
+      const end: [number, number] =
+        direction === "TB"
+          ? [target.x + target.width / 2, target.y]
+          : [target.x, target.y + target.height / 2];
+      builder.connector({
+        start,
+        end,
+        startElement: source,
+        endElement: target,
+        strokeColor: preset.stroke,
+        strokeWidth: preset.strokeWidth,
+        strokeStyle: style,
+        roughness: preset.roughness,
+      });
+      if (edge.label) placeEdgeLabel(start, end, edge.label);
+      continue;
+    }
+
+    // Skip-level / same-layer / back edges: route via a clear side-lane through
+    // the inter-layer gutters so the connector never crosses a card or label.
+    laneIndex += 1;
+    let pts: Array<[number, number]>;
+    let labelA: [number, number];
+    let labelB: [number, number];
+    if (direction === "TB") {
+      const lane = bounds.maxX + laneGap * laneIndex;
+      const sx = source.x + source.width / 2;
+      const tx = target.x + target.width / 2;
+      const gy1 = source.y + source.height + preset.spacingY / 2;
+      const gy2 = target.y - preset.spacingY / 2;
+      pts = [
+        [sx, source.y + source.height],
+        [sx, gy1],
+        [lane, gy1],
+        [lane, gy2],
+        [tx, gy2],
+        [tx, target.y],
+      ];
+      labelA = [lane, gy1];
+      labelB = [lane, gy2];
+    } else {
+      const lane = bounds.maxY + laneGap * laneIndex;
+      const sy = source.y + source.height / 2;
+      const ty = target.y + target.height / 2;
+      const gx1 = source.x + source.width + preset.spacingX / 2;
+      const gx2 = target.x - preset.spacingX / 2;
+      pts = [
+        [source.x + source.width, sy],
+        [gx1, sy],
+        [gx1, lane],
+        [gx2, lane],
+        [gx2, ty],
+        [target.x, ty],
+      ];
+      labelA = [gx1, lane];
+      labelB = [gx2, lane];
+    }
+    builder.routedConnector({
+      points: pts,
       startElement: source,
       endElement: target,
       strokeColor: preset.stroke,
       strokeWidth: preset.strokeWidth,
-      strokeStyle: edge.style ?? preset.arrowStyle,
+      strokeStyle: style,
       roughness: preset.roughness,
     });
-    if (edge.label) {
-      const metrics = measureText(edge.label, preset.minFontSize, preset.fontFamily);
-      builder.text({
-        x: (start[0] + end[0]) / 2 - metrics.width / 2,
-        y: (start[1] + end[1]) / 2 - metrics.height / 2,
-        text: edge.label,
-        fontSize: preset.minFontSize,
-        fontFamily: preset.fontFamily,
-        strokeColor: preset.textColor,
-        textAlign: "center",
-      });
-    }
+    if (edge.label) placeEdgeLabel(labelA, labelB, edge.label);
   }
 
   return builder.build();

@@ -159,6 +159,34 @@ describe("MCP tools (end-to-end via registry)", () => {
     );
   });
 
+  it("add_library_items_normalized rejects items that lower the score", async () => {
+    libraryAdapter.addItems = vi.fn(async ({ scene }: { scene: { elements: unknown[] } }) => ({
+      scene: { ...scene, elements: [...scene.elements, { id: "bad", type: "rectangle", x: 0, y: 0, width: 10, height: 8 }] },
+      addedItems: 1, addedElements: 1, items: [{ name: "x", placement: "grid" }], librariesUsed: ["lib"],
+    })) as never;
+    const res = await handler("add_library_items_normalized")(
+      { libraryId: "lib", elements: [{ id: "a", type: "rectangle", x: 0, y: 0, width: 160, height: 60 }] },
+      ctxFor("user-1"),
+    );
+    const data = sc(res) as { accepted: boolean; scoreBefore: number; scoreAfter: number };
+    expect(data.accepted).toBe(false);
+    expect(data.scoreAfter).toBeLessThanOrEqual(data.scoreBefore);
+  });
+
+  it("add_library_items_normalized accepts non-worsening items and reports usage", async () => {
+    libraryAdapter.addItems = vi.fn(async ({ scene }: { scene: { elements: unknown[] } }) => ({
+      scene: { ...scene, elements: [...scene.elements, { id: "icon", type: "image", x: 8, y: 8, width: 24, height: 24, customData: { excalidash: { library: "logos", item: "AWS" } } }] },
+      addedItems: 1, addedElements: 1, items: [{ name: "AWS", placement: "inside-card-left" }], librariesUsed: ["logos"],
+    })) as never;
+    const res = await handler("add_library_items_normalized")(
+      { libraryId: "logos", placement: "inside-card-left", targetCardId: "a", elements: [{ id: "a", type: "rectangle", x: 0, y: 0, width: 160, height: 60 }] },
+      ctxFor("user-1"),
+    );
+    const data = sc(res) as { accepted: boolean; librariesUsed: string[] };
+    expect(data.accepted).toBe(true);
+    expect(data.librariesUsed).toContain("logos");
+  });
+
   it("validate_architecture accepts structured input", async () => {
     const res = await handler("validate_architecture")(
       {

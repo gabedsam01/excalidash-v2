@@ -460,6 +460,11 @@ Code, or any MCP client) can create, edit, validate, repair, version, export and
 save professional Excalidraw diagrams in the authenticated user's workspace. The
 LLM stays external — the MCP only executes **exactly 25 deterministic tools**.
 
+It also exposes **25 MCP prompts** (auto-discovered as `/mcp__excalidash__*`
+commands once connected) and ships **25 optional Claude Code skills** you install
+separately. See [docs/mcp.md](docs/mcp.md) and [docs/skills.md](docs/skills.md)
+for the full reference and troubleshooting.
+
 ### Connecting
 
 Authenticate with a Bearer `exd_` [API key](#api-keys-for-mcp-clients):
@@ -496,15 +501,55 @@ Other clients:
 
 Start every session with `read_mcp_guide`.
 
+### 25 MCP prompts (auto-discovered)
+
+Once the MCP is connected, `prompts/list` exposes **25 prompts** that appear in
+Claude Code as commands:
+
+```text
+/mcp__excalidash__diagram_director
+/mcp__excalidash__repo_to_system_design
+/mcp__excalidash__security_architecture
+… (25 total)
+```
+
+These are **not** tools (the 25-tool count is unchanged) — they are guided
+skill prompts that drive the quality flow. They require no install: connecting
+the MCP is enough.
+
+### 25 Claude Code skills (optional, installed locally)
+
+The repo also ships 25 real Claude Code skills under `skills/excalidash/`.
+`claude mcp add` does **not** install these — copy them with the bundled CLI:
+
+```bash
+npx -y @excalidash/claude-skills install --scope user
+npx -y @excalidash/claude-skills install --scope project --project-dir .
+# local fallback (no npm publish needed):
+node packages/excalidash-claude-skills/bin/install.cjs install --scope user
+node packages/excalidash-claude-skills/bin/install.cjs verify
+```
+
+User scope copies to `~/.claude/skills/excalidash/*`; project/local to
+`./.claude/skills/excalidash/*`. See [docs/skills.md](docs/skills.md).
+
 ### Quality flow (geometry-validated)
 
-Generation is backed by a **geometry engine** (bounding boxes, intersection,
-text/element containment, minimum distance, grid snapping, font size, arrow
-binding, density, viewport). Diagrams go through **lint → score (0-100) →
-repair → auto-polish**. The default passing bar is **`MCP_MIN_DRAWING_SCORE=95`**;
-`save_drawing` will not save below the bar unless `asDraft` (and
-`MCP_ALLOW_LOW_SCORE_DRAFT`) is set. `auto_polish_drawing` loops up to
-`MCP_MAX_REPAIR_ATTEMPTS`.
+Generation is backed by a **geometry engine** (bounding boxes, **segment/rect
+intersection**, text/element containment, minimum distance, grid snapping, font
+size, arrow binding, density, viewport). Diagrams go through **lint → score
+(0-100) → repair → auto-polish**.
+
+`score_drawing` is honest: **hard blockers** (an arrow over readable text, content
+over a frame title, stacked duplicates, text overflow, an item stranded outside
+its frame) cap the score below the passing bar regardless of how few other issues
+exist, and each penalty ships with **mathematical evidence** (intersection area,
+overlap ratio, font px) plus an ordered **repair plan**. `repair_drawing` reroutes
+arrows around text, moves edge labels off arrow paths, and grows frames;
+`auto_polish_drawing` loops up to `MCP_MAX_REPAIR_ATTEMPTS` and **rolls back** any
+pass that lowers the score. The default passing bar is
+**`MCP_MIN_DRAWING_SCORE=95`**; `save_drawing` will not save below the bar unless
+`asDraft` (and `MCP_ALLOW_LOW_SCORE_DRAFT`) is set.
 
 - **Presets**: `handdrawn-clean`, `technical-docs`, `startup-deck`,
   `dark-architecture`, `minimal-whiteboard`, `portfolio-polished`.
@@ -513,7 +558,8 @@ repair → auto-polish**. The default passing bar is **`MCP_MIN_DRAWING_SCORE=95
   boundary, UI dashboard wireframe, portfolio architecture.
 - **Architecture patterns** (`apply_architecture_skill`): clean, hexagonal, ddd,
   c4, cqrs, event-driven, microservices, modular-monolith, mcp.
-- **Skills**: versioned guidance files under `backend/src/mcp/skills/`.
+- **Skills**: 25 installable Claude Code skills under `skills/excalidash/` (plus
+  in-code guidance files under `backend/src/mcp/skills/`).
 
 ### Libraries
 
@@ -548,7 +594,8 @@ MCP_MAX_REPAIR_ATTEMPTS=5
 MCP_ALLOW_LOW_SCORE_DRAFT=true
 MCP_MAX_ELEMENTS=5000
 MCP_MAX_EXPORT_MB=100
-MCP_DEFAULT_LIBRARY_MODE=curated
+MCP_DEFAULT_LIBRARY_MODE=curated   # which packs search returns
+MCP_LIBRARY_MODE=curated           # off | curated | required (library usage enforcement)
 MCP_PUBLIC_SEARCH_ENABLED=false
 MCP_RATE_LIMIT_WINDOW_SECONDS=900
 MCP_RATE_LIMIT_MAX=300

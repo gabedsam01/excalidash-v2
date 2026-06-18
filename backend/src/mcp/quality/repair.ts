@@ -2,13 +2,19 @@
  * repair_drawing — apply deterministic, geometry-driven fixes for repairable
  * issues. Non-destructive: operates on a deep clone and reports what changed.
  */
-import type { ExcalidrawElement, ExcalidrawScene } from "../types";
+import type { BBox, ExcalidrawElement, ExcalidrawScene } from "../types";
 import { measureText } from "../excalidraw/elements";
 import {
   bboxCenter,
+  bboxHeight,
+  bboxWidth,
   elementBBox,
+  frameTitleBand,
   isFrame,
   isShape,
+  isText,
+  linearCrossesRect,
+  linearSegments,
   liveElements,
   overlapRatio,
   snapToGrid,
@@ -122,11 +128,23 @@ export const repairScene = (
     applied.add("OFF_GRID");
   }
 
-  // 6. Items referencing a frame they sit outside: clear the frame link.
+  // 6. Items referencing a frame they sit outside: grow the frame to contain
+  //    them (preferred — keeps the grouping) and re-snap the frame box.
   for (const issue of issues.filter((i) => i.code === "ITEM_OUTSIDE_FRAME")) {
     const el = byId.get(issue.elementIds[0]);
-    if (!el) continue;
-    el.frameId = null;
+    const frame = byId.get(issue.elementIds[1]);
+    if (!el || !frame || !isFrame(frame)) continue;
+    const pad = 24;
+    const fb = elementBBox(frame);
+    const eb = elementBBox(el);
+    const minX = Math.min(fb.minX, eb.minX - pad);
+    const minY = Math.min(fb.minY, eb.minY - pad);
+    const maxX = Math.max(fb.maxX, eb.maxX + pad);
+    const maxY = Math.max(fb.maxY, eb.maxY + pad);
+    frame.x = snapToGrid(minX, opts.gridSize);
+    frame.y = snapToGrid(minY, opts.gridSize);
+    frame.width = snapToGrid(maxX - minX, opts.gridSize);
+    frame.height = snapToGrid(maxY - minY, opts.gridSize);
     applied.add("ITEM_OUTSIDE_FRAME");
   }
 
@@ -205,6 +223,132 @@ export const repairScene = (
     b.x = num(b.x) + shift;
     recenterBoundText(b, elements);
     applied.add("OVERLAP");
+  }
+
+  // Helpers for connector/label repairs (need opts + elements in scope).
+  const crossesAny = (text: ExcalidrawElement, arrows: ExcalidrawElement[]) =>
+    arrows.some((a) => linearCrossesRect(a, elementBBox(text)) > 0);
+
+  const moveTextOffArrows = (
+    text: ExcalidrawElement,
+    arrows: ExcalidrawElement[],
+  ): boolean => {
+    if (!crossesAny(text, arrows)) return true;
+    const step = 14;
+    const dirs: Array<[number, number]> = [
+      [0, -1],
+      [0, 1],
+      [1, 0],
+      [-1, 0],
+    ];
+    const ox = num(text.x);
+    const oy = num(text.y);
+    for (const [dx, dy] of dirs) {
+      for (let k = 1; k <= 12; k += 1) {
+        text.x = ox + dx * step * k;
+        text.y = oy + dy * step * k;
+        if (!crossesAny(text, arrows)) {
+          text.x = snapToGrid(num(text.x), opts.gridSize);
+          text.y = snapToGrid(num(text.y), opts.gridSize);
+          return true;
+        }
+      }
+      text.x = ox;
+      text.y = oy;
+    }
+    return false;
+  };
+
+  const detourArrowAround = (
+    arrow: ExcalidrawElement,
+    box: BBox,
+    gap: number,
+  ): boolean => {
+    const segs = linearSegments(arrow);
+    if (segs.length === 0) return false;
+    const start = segs[0][0];
+    const end = segs[segs.length - 1][1];
+    const dx = end[0] - start[0];
+    const dy = end[1] - start[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len;
+    const py = dx / len;
+    const mid: [number, number] = [
+      (start[0] + end[0]) / 2,
+      (start[1] + end[1]) / 2,
+    ];
+    const reach = Math.max(bboxWidth(box), bboxHeight(box)) / 2 + gap;
+    const orig = { x: arrow.x, y: arrow.y, points: arrow.points };
+    for (const sign of [1, -1]) {
+      const way: [number, number] = [
+        mid[0] + px * reach * sign,
+        mid[1] + py * reach * sign,
+      ];
+      const minX = Math.min(start[0], way[0], end[0]);
+      const minY = Math.min(start[1], way[1], end[1]);
+      arrow.x = minX;
+      arrow.y = minY;
+      arrow.points = [
+        [start[0] - minX, start[1] - minY],
+        [way[0] - minX, way[1] - minY],
+        [end[0] - minX, end[1] - minY],
+      ];
+      arrow.width = Math.max(start[0], way[0], end[0]) - minX;
+      arrow.height = Math.max(start[1], way[1], end[1]) - minY;
+      if (linearCrossesRect(arrow, box) === 0) return true;
+    }
+    arrow.x = orig.x;
+    arrow.y = orig.y;
+    arrow.points = orig.points;
+    return false;
+  };
+
+  // 9. Arrows crossing readable text: move free labels off the path, or detour
+  //    the arrow with an elbow around a crossed card label.
+  const allArrows = elements.filter((el) => el.type === "arrow");
+  for (const issue of issues.filter((i) => i.code === "ARROW_TEXT_INTERSECTION")) {
+    const arrow = byId.get(issue.elementIds[0]);
+    const text = byId.get(issue.elementIds[1]);
+    if (!arrow || !text) continue;
+    if (!text.containerId && isText(text)) {
+      if (moveTextOffArrows(text, allArrows)) {
+        applied.add("ARROW_TEXT_INTERSECTION");
+      }
+    } else if (detourArrowAround(arrow, elementBBox(text), 28)) {
+      applied.add("ARROW_TEXT_INTERSECTION");
+    }
+  }
+
+  // 10. Content over a frame title band: lower it below the band.
+  for (const issue of issues.filter((i) => i.code === "FRAME_TITLE_OVERLAP")) {
+    const el = byId.get(issue.elementIds[0]);
+    const frame = byId.get(issue.elementIds[1]);
+    if (!el || !frame || !isFrame(frame)) continue;
+    const band = frameTitleBand(frame, opts.frameTitleBand);
+    const shift = band.maxY - elementBBox(el).minY + 8;
+    if (shift > 0) {
+      el.y = snapToGrid(num(el.y) + shift, opts.gridSize);
+      if (isShape(el)) recenterBoundText(el, elements);
+      applied.add("FRAME_TITLE_OVERLAP");
+    }
+  }
+
+  // 11. Free labels hugging a frame border: nudge inward.
+  for (const issue of issues.filter((i) => i.code === "TEXT_NEAR_EDGE")) {
+    const el = byId.get(issue.elementIds[0]);
+    const frame = byId.get(issue.elementIds[1]);
+    if (!el || !frame) continue;
+    const fb = elementBBox(frame);
+    const eb = elementBBox(el);
+    const m = opts.edgeMargin + 6;
+    if (eb.minX - fb.minX < m) el.x = snapToGrid(fb.minX + m, opts.gridSize);
+    else if (fb.maxX - eb.maxX < m) {
+      el.x = snapToGrid(fb.maxX - bboxWidth(eb) - m, opts.gridSize);
+    }
+    if (fb.maxY - eb.maxY < m) {
+      el.y = snapToGrid(fb.maxY - bboxHeight(eb) - m, opts.gridSize);
+    }
+    applied.add("TEXT_NEAR_EDGE");
   }
 
   return { scene: next, applied: Array.from(applied) };

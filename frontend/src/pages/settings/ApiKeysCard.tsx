@@ -206,8 +206,13 @@ export const ApiKeysCard: React.FC = () => {
           </h2>
           <p className="mt-1 text-sm font-medium text-slate-600 dark:text-neutral-400">
             Create and manage API keys for external MCP clients. The ExcaliDash
-            MCP server is live at <code>/mcp</code> with 25 drawing tools — use a
-            key below as the Bearer token to connect Claude Code or any MCP client.
+            MCP server is live at <code>/mcp</code> with{" "}
+            <strong>25 drawing tools</strong>,{" "}
+            <strong>25 auto-discovered MCP prompts</strong> (
+            <code>/mcp__excalidash__…</code>), and{" "}
+            <strong>25 optional Claude Code skills</strong> you can install
+            locally — use a key below as the Bearer token to connect Claude Code
+            or any MCP client.
           </p>
         </div>
       </div>
@@ -468,6 +473,44 @@ export const ApiKeysCard: React.FC = () => {
                 </code>
               </pre>
             </div>
+
+            <div className="rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-50/50 dark:bg-neutral-800/30 p-4">
+              <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400 mb-2">
+                After connecting: prompts vs. skills
+              </p>
+              <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
+                <strong className="text-slate-900 dark:text-white">
+                  MCP prompts appear automatically.
+                </strong>{" "}
+                Once the MCP is added, run <code>/mcp</code> in Claude Code to see
+                25 tools and 25 prompts. The prompts show up as commands:{" "}
+                <code>/mcp__excalidash__diagram_director</code>,{" "}
+                <code>/mcp__excalidash__repo_to_system_design</code>, …
+              </p>
+              <p className="mt-3 text-sm font-medium text-slate-600 dark:text-neutral-400">
+                <strong className="text-slate-900 dark:text-white">
+                  Claude Code skills must be installed/copied.
+                </strong>{" "}
+                <code>claude mcp add</code> does <em>not</em> copy local skill
+                files into <code>~/.claude/skills</code>. Install the 25 skills
+                with:
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
+                <code>
+                  {[
+                    "# user scope (all projects)",
+                    "npx -y @excalidash/claude-skills install --scope user",
+                    "",
+                    "# project scope (this repo's .claude/skills)",
+                    "npx -y @excalidash/claude-skills install --scope project --project-dir .",
+                    "",
+                    "# local fallback (from this repo, no npm publish needed)",
+                    "node packages/excalidash-claude-skills/bin/install.cjs install --scope user",
+                    "node packages/excalidash-claude-skills/bin/install.cjs verify",
+                  ].join("\n")}
+                </code>
+              </pre>
+            </div>
           </div>
         ) : (
           <div className="mt-4">
@@ -485,7 +528,15 @@ export const ApiKeysCard: React.FC = () => {
             <p className="mt-3 text-sm font-medium text-slate-600 dark:text-neutral-400">
               Some MCP clients use "streamable-http" instead of "http" for the
               same HTTP transport. If your client rejects "http", change type
-              to "streamable-http".
+              to "streamable-http". Clients that support eager loading may add{" "}
+              <code>"alwaysLoad": true</code> next to <code>url</code> to load
+              the server's tools/prompts at startup.
+            </p>
+            <p className="mt-2 text-sm font-medium text-slate-600 dark:text-neutral-400">
+              This server exposes <strong>25 tools</strong> and{" "}
+              <strong>25 prompts</strong> (via <code>prompts/list</code>). The 25
+              Claude Code skills are an optional local install — see the Claude
+              Code tab.
             </p>
           </div>
         )}

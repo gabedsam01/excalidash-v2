@@ -6,6 +6,7 @@ import type { McpConfig } from "./types";
 import { listPresets } from "./templates/presets";
 import { listTemplates } from "./templates/templates";
 import { ARCHITECTURE_PATTERN_IDS } from "./architecture/patterns";
+import { PROMPT_NAMES } from "./prompts/registry";
 
 export interface McpGuide {
   name: string;
@@ -25,8 +26,19 @@ export interface McpGuide {
   architecturePatterns: string[];
   libraryPolicy: {
     defaultMode: string;
+    enforcement: string;
     publicSearchEnabled: boolean;
     note: string;
+  };
+  prompts: {
+    count: number;
+    note: string;
+    commandFormat: string;
+  };
+  claudeCodeSkills: {
+    count: number;
+    note: string;
+    install: string[];
   };
   bestPractices: string[];
   exportFormats: string[];
@@ -70,8 +82,23 @@ export const buildGuide = (config: McpConfig): McpGuide => ({
   architecturePatterns: ARCHITECTURE_PATTERN_IDS,
   libraryPolicy: {
     defaultMode: config.defaultLibraryMode,
+    enforcement: config.libraryMode ?? "curated",
     publicSearchEnabled: config.publicSearchEnabled,
-    note: "Prefer curated CORE/SPECIALIZED packs. Use cache_library before add_library_items. Public search is only used when explicitly enabled/requested.",
+    note: "Prefer curated CORE/SPECIALIZED packs. Use cache_library before add_library_items_normalized. In MCP_LIBRARY_MODE=required, a rich diagram with no library/icon items is a hard blocker.",
+  },
+  prompts: {
+    count: PROMPT_NAMES.length,
+    note: "25 MCP prompts are exposed via prompts/list and appear in Claude Code as commands once the MCP is connected.",
+    commandFormat: "/mcp__excalidash__<prompt_name>",
+  },
+  claudeCodeSkills: {
+    count: 25,
+    note: "25 optional Claude Code skills can be installed/copied locally (they are NOT installed by `claude mcp add`).",
+    install: [
+      "npx -y @excalidash/claude-skills install --scope user",
+      "npx -y @excalidash/claude-skills install --scope project --project-dir .",
+      "node packages/excalidash-claude-skills/bin/install.cjs install --scope user",
+    ],
   },
   bestPractices: [
     "Always run the quality flow before saving as final.",
@@ -109,8 +136,17 @@ export const guideToMarkdown = (guide: McpGuide): string =>
     "",
     `## Library policy`,
     `- Default mode: ${guide.libraryPolicy.defaultMode}`,
+    `- Enforcement (MCP_LIBRARY_MODE): ${guide.libraryPolicy.enforcement}`,
     `- Public search enabled: ${guide.libraryPolicy.publicSearchEnabled}`,
     `- ${guide.libraryPolicy.note}`,
+    "",
+    `## MCP prompts (${guide.prompts.count})`,
+    `- ${guide.prompts.note}`,
+    `- Command format: ${guide.prompts.commandFormat}`,
+    "",
+    `## Claude Code skills (${guide.claudeCodeSkills.count})`,
+    `- ${guide.claudeCodeSkills.note}`,
+    ...guide.claudeCodeSkills.install.map((c) => `- \`${c}\``),
     "",
     `## Best practices`,
     guide.bestPractices.map((b) => `- ${b}`).join("\n"),

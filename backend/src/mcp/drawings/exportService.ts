@@ -17,6 +17,7 @@ import {
   liveElements,
   unionBBox,
 } from "../geometry/geometry";
+import { redactScene } from "../security/redaction";
 
 export type ExportFormat = "excalidraw" | "svg" | "png";
 
@@ -160,10 +161,12 @@ ${body}
 };
 
 export const exportScene = (
-  scene: ExcalidrawScene,
+  rawScene: ExcalidrawScene,
   format: ExportFormat,
   maxBytes: number,
 ): ExportResult => {
+  // Redact secrets before they can leak into an exported file.
+  const scene = redactScene(rawScene);
   if (format === "excalidraw") {
     const content = JSON.stringify({
       type: "excalidraw",

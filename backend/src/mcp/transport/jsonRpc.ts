@@ -1,9 +1,11 @@
 /**
  * Minimal MCP streamable-HTTP transport over JSON-RPC 2.0. No SDK dependency.
- * Supports initialize, notifications/*, ping, tools/list and tools/call.
+ * Supports initialize, notifications/*, ping, tools/list, tools/call,
+ * prompts/list and prompts/get (the 25 prompts surface as /mcp__excalidash__*).
  */
 import { isMcpToolError } from "../errors";
 import type { McpTool, ToolContext } from "../registry/toolRegistry";
+import type { McpPrompt } from "../prompts/registry";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
@@ -47,6 +49,7 @@ export const handleMcpMessage = async (
   ctx: ToolContext,
   tools: McpTool[],
   serverInfo: ServerInfo,
+  prompts: McpPrompt[] = [],
 ): Promise<JsonRpcResponse | undefined> => {
   const id = message?.id ?? null;
   const isNotification = !message || message.id === undefined;
@@ -68,10 +71,13 @@ export const handleMcpMessage = async (
         MCP_PROTOCOL_VERSION;
       return resultResponse(id, {
         protocolVersion: requested,
-        capabilities: { tools: { listChanged: false } },
+        capabilities: {
+          tools: { listChanged: false },
+          prompts: { listChanged: false },
+        },
         serverInfo,
         instructions:
-          "Call read_mcp_guide first. Generate → lint → score → repair/auto_polish (min score 95) → save → get_drawing_url.",
+          "Call read_mcp_guide first. Generate → lint → score → repair/auto_polish (min score 95) → save → get_drawing_url. 25 prompts are available as /mcp__excalidash__*.",
       });
     }
     case "ping":
@@ -84,6 +90,28 @@ export const handleMcpMessage = async (
           inputSchema: t.jsonSchema,
         })),
       });
+    case "prompts/list":
+      return resultResponse(id, {
+        prompts: prompts.map((p) => ({
+          name: p.name,
+          title: p.title,
+          description: p.description,
+          arguments: p.arguments,
+        })),
+      });
+    case "prompts/get": {
+      const name = message.params?.name as string | undefined;
+      const promptArgs =
+        (message.params?.arguments as Record<string, string> | undefined) ?? {};
+      const prompt = prompts.find((p) => p.name === name);
+      if (!prompt) {
+        return errorResponse(id, -32602, `Unknown prompt: ${String(name)}`);
+      }
+      return resultResponse(id, {
+        description: prompt.description,
+        messages: prompt.render(promptArgs),
+      });
+    }
     case "tools/call": {
       const name = message.params?.name as string | undefined;
       const args = (message.params?.arguments as unknown) ?? {};
