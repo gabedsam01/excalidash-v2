@@ -17,14 +17,19 @@ import type {
 } from "../../api";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import {
-  buildCodexConfig,
-  buildCodexEnvCommand,
-  buildCodexFullSetup,
+  buildCodexAddCommand,
+  buildCodexManualToml,
+  buildCodexUsefulCommands,
   buildMcpUrl,
+  CODEX_SCOPES,
+  CODEX_SERVER_NAME,
   CODEX_TOKEN_PLACEHOLDER,
 } from "./mcp";
 
 const TOKEN_PLACEHOLDER = "<YOUR_API_KEY>";
+
+// Constant — no inputs, so it lives at module scope (no per-render recompute).
+const CODEX_USEFUL_COMMANDS = buildCodexUsefulCommands();
 
 const formatDate = (value: string): string => {
   const date = new Date(value);
@@ -112,13 +117,16 @@ export const ApiKeysCard: React.FC = () => {
     [instructionToken, mcpUrl],
   );
 
-  const codexConfig = useMemo(() => buildCodexConfig(mcpUrl), [mcpUrl]);
-  const codexEnvCommand = useMemo(
-    () => buildCodexEnvCommand(codexToken),
-    [codexToken],
+  const codexCommands = useMemo(
+    () =>
+      CODEX_SCOPES.map((scope) => ({
+        scope,
+        command: buildCodexAddCommand(mcpUrl, codexToken, scope),
+      })),
+    [codexToken, mcpUrl],
   );
-  const codexFullSetup = useMemo(
-    () => buildCodexFullSetup(mcpUrl, codexToken),
+  const codexManualToml = useMemo(
+    () => buildCodexManualToml(mcpUrl, codexToken),
     [codexToken, mcpUrl],
   );
 
@@ -539,68 +547,93 @@ export const ApiKeysCard: React.FC = () => {
         ) : client === "codex" ? (
           <div className="mt-4 space-y-4">
             <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
-              Add this server to <code>~/.codex/config.toml</code> for your
-              global Codex configuration, or to <code>.codex/config.toml</code>{" "}
-              in a trusted project.
+              One command per scope — copy it, paste it, run it. Each command uses{" "}
+              <code>codex mcp add</code> to register the server and embeds your API
+              key inline as an <code>Authorization</code> header. No{" "}
+              <code>export</code>, no environment variable, and no manual{" "}
+              <code>config.toml</code> editing.
             </p>
 
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
-                  config.toml
-                </span>
-                <CopyButton
-                  text={codexConfig}
-                  label="Copy Codex config.toml"
-                  buttonText="Copy Codex config.toml"
-                  copied={copiedLabel === "Copy Codex config.toml"}
-                  onCopy={copyText}
-                />
+            {codexCommands.map(({ scope, command }) => (
+              <div key={scope}>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
+                    {scope}
+                  </span>
+                  <CopyButton
+                    text={command}
+                    label={`Copy codex ${scope} command`}
+                    copied={copiedLabel === `Copy codex ${scope} command`}
+                    onCopy={copyText}
+                  />
+                </div>
+                <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
+                  <code>{command}</code>
+                </pre>
               </div>
-              <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
-                <code>{codexConfig}</code>
-              </pre>
+            ))}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-medium text-slate-600 dark:text-neutral-400">
+              <p>
+                <strong className="text-slate-900 dark:text-white">user:</strong>{" "}
+                writes <code>~/.codex/config.toml</code> — available in every
+                project.
+              </p>
+              <p>
+                <strong className="text-slate-900 dark:text-white">
+                  project:
+                </strong>{" "}
+                writes <code>./.codex/config.toml</code> in this repo. Codex loads
+                it only for <strong>trusted</strong> projects. Do not commit real
+                tokens.
+              </p>
+            </div>
+
+            <div className="rounded-xl border-2 border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20 p-4 text-sm font-medium text-amber-900 dark:text-amber-200">
+              <strong>Project scope needs trust.</strong> Codex reads{" "}
+              <code>./.codex/config.toml</code> only after you trust the folder.
+              Run <code>codex</code> in the project and accept the trust prompt on
+              first launch (if you have used Codex here before, it is already
+              trusted). User scope (<code>~/.codex/config.toml</code>) needs no
+              trust and works in every project.
             </div>
 
             <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
-                  Environment
-                </span>
-                <CopyButton
-                  text={codexEnvCommand}
-                  label="Copy Codex env command"
-                  buttonText="Copy Codex env command"
-                  copied={copiedLabel === "Copy Codex env command"}
-                  onCopy={copyText}
-                />
-              </div>
+              <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400 mb-2">
+                Useful commands
+              </p>
               <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
-                <code>{codexEnvCommand}</code>
+                <code>{CODEX_USEFUL_COMMANDS}</code>
               </pre>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
-                  Full setup
-                </span>
+            <details className="rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-50/50 dark:bg-neutral-800/30 p-4">
+              <summary className="cursor-pointer text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
+                Advanced: manual config.toml
+              </summary>
+              <p className="mt-3 text-sm font-medium text-slate-600 dark:text-neutral-400">
+                Prefer the command above. If you edit <code>config.toml</code> by
+                hand, this is the equivalent block — the token lives in an inline{" "}
+                <code>http_headers</code> table, never an environment variable.
+              </p>
+              <div className="mt-3 flex justify-end mb-2">
                 <CopyButton
-                  text={codexFullSetup}
-                  label="Copy full Codex setup"
-                  buttonText="Copy full Codex setup"
-                  copied={copiedLabel === "Copy full Codex setup"}
+                  text={codexManualToml}
+                  label="Copy Codex manual config"
+                  buttonText="Copy Codex manual config"
+                  copied={copiedLabel === "Copy Codex manual config"}
                   onCopy={copyText}
                 />
               </div>
               <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
-                <code>{codexFullSetup}</code>
+                <code>{codexManualToml}</code>
               </pre>
-            </div>
+            </details>
 
             <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
               Start Codex with <code>codex</code>, then run <code>/mcp</code>{" "}
-              inside Codex to inspect the connected server.
+              inside Codex to confirm <code>{CODEX_SERVER_NAME}</code> is enabled
+              with its tools available.
             </p>
           </div>
         ) : (

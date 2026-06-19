@@ -141,8 +141,8 @@ describe("ApiKeysCard", () => {
     });
   });
 
-  it("shows copyable Codex config, environment command, and full setup", async () => {
-    render(<ApiKeysCard />);
+  it("shows Codex commands using `codex mcp add` with an inline header (no env var)", async () => {
+    const { container } = render(<ApiKeysCard />);
     await screen.findByText("No API keys yet");
 
     fireEvent.change(screen.getByLabelText("MCP client"), {
@@ -150,47 +150,89 @@ describe("ApiKeysCard", () => {
     });
 
     const expectedUrl = buildMcpUrl(window.location.origin);
-    expect(
-      screen.getAllByText(/\[mcp_servers\.excalidash\]/).length,
-    ).toBeGreaterThan(0);
+    const panelText = container.textContent ?? "";
+
+    // Primary flow uses `codex mcp add --url` for both scopes.
     expect(
       screen.getAllByText(
-        /bearer_token_env_var = "EXCALIDASH_API_KEY"/,
+        new RegExp(`codex mcp add excalidash --url ${expectedUrl}`),
       ).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText(new RegExp(expectedUrl)).length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(/exd_replace_with_your_api_key/).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText(/inside Codex to inspect/)).toHaveTextContent("/mcp");
+    ).toBeGreaterThanOrEqual(2);
 
+    // Token is passed inline as an Authorization header, with the placeholder.
+    expect(panelText).toContain(
+      'Authorization = "Bearer exd_REPLACE_WITH_YOUR_API_KEY"',
+    );
+    expect(panelText).toContain("[mcp_servers.excalidash.http_headers]");
+
+    // Project scope targets ./.codex/config.toml.
+    expect(panelText).toContain("CODEX_HOME=\"$PWD/.codex\" codex mcp add");
+    expect(panelText).toContain("cat >> .codex/config.toml");
+
+    // Forbidden patterns must NOT appear in the main flow.
+    expect(panelText).not.toContain("bearer_token_env_var");
+    expect(panelText).not.toContain("export ");
+    expect(panelText).not.toMatch(/\bsetx\b/);
+
+    // Useful commands + /mcp guidance.
+    expect(panelText).toContain("codex mcp list");
+    expect(panelText).toContain("codex mcp remove excalidash");
+    expect(screen.getByText(/inside Codex to confirm/)).toHaveTextContent("/mcp");
+
+    // Copy buttons copy the exact command for each scope.
     fireEvent.click(
-      screen.getByRole("button", { name: "Copy Codex config.toml" }),
+      screen.getByRole("button", { name: "Copy codex user command" }),
     );
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining("[mcp_servers.excalidash]"),
+        expect.stringContaining("codex mcp add excalidash --url"),
       );
     });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Authorization = "Bearer exd_REPLACE_WITH_YOUR_API_KEY"',
+      ),
+    );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Copy Codex env command" }),
+      screen.getByRole("button", { name: "Copy codex project command" }),
     );
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        'export EXCALIDASH_API_KEY="exd_replace_with_your_api_key"',
+        expect.stringContaining('CODEX_HOME="$PWD/.codex" codex mcp add'),
       );
     });
+  });
+
+  it("embeds the freshly generated token in the Codex command (one-time reveal)", async () => {
+    const generated = {
+      ...existingKey,
+      id: "key-codex",
+      name: "Codex notebook",
+      client: "codex" as const,
+      token: "exd_0123456789abcdef_codextoken000000000000000000000000",
+    };
+    apiMocks.createApiKey.mockResolvedValue(generated);
+
+    render(<ApiKeysCard />);
+    await screen.findByText("No API keys yet");
+
+    fireEvent.change(screen.getByLabelText("MCP client"), {
+      target: { value: "codex" },
+    });
+    fireEvent.change(screen.getByLabelText("Key name"), {
+      target: { value: "Codex notebook" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate API Key" }));
+
+    await screen.findByText("Copy this token now. It will only be shown once.");
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Copy full Codex setup" }),
+      screen.getByRole("button", { name: "Copy codex user command" }),
     );
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining("mkdir -p ~/.codex"),
-      );
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining("codex"),
+        expect.stringContaining(`Authorization = "Bearer ${generated.token}"`),
       );
     });
   });

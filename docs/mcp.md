@@ -29,48 +29,92 @@ The full token is shown only once.
 Documentation and shared configuration must use this placeholder:
 
 ```txt
-exd_replace_with_your_api_key
+exd_REPLACE_WITH_YOUR_API_KEY
 ```
 
 ## Codex
 
-Codex reads global configuration from `~/.codex/config.toml`. A trusted project
-can also provide `.codex/config.toml`; the Codex CLI and IDE extension share
-these configuration layers.
+Codex shares one MCP configuration between the CLI and the IDE extension. It
+lives in `config.toml` and supports two layers: user-level at
+`~/.codex/config.toml`, or project-scoped at `./.codex/config.toml` for trusted
+projects.
 
-Create or edit the configuration file:
+The Codex CLI has no `--transport`, `--header`, or `--scope` flags. The setup
+below uses `codex mcp add --url` to register the Streamable HTTP server and
+appends an inline `http_headers` table that carries the bearer token. There is
+no environment variable, no `export`, no `bearer_token_env_var`, and no manual
+file editing — paste the command and run it. The leading `codex mcp remove`
+makes the command safe to re-run (for example, when rotating a key).
+
+### User scope — `~/.codex/config.toml`
+
+```bash
+codex mcp remove excalidash >/dev/null 2>&1
+codex mcp add excalidash --url http://localhost:6767/mcp
+cat >> ~/.codex/config.toml <<'TOML'
+
+[mcp_servers.excalidash.http_headers]
+Authorization = "Bearer exd_REPLACE_WITH_YOUR_API_KEY"
+TOML
+```
+
+### Project scope — `./.codex/config.toml`
+
+```bash
+mkdir -p .codex
+CODEX_HOME="$PWD/.codex" codex mcp remove excalidash >/dev/null 2>&1
+CODEX_HOME="$PWD/.codex" codex mcp add excalidash --url http://localhost:6767/mcp
+cat >> .codex/config.toml <<'TOML'
+
+[mcp_servers.excalidash.http_headers]
+Authorization = "Bearer exd_REPLACE_WITH_YOUR_API_KEY"
+TOML
+```
+
+`codex mcp add` registers the Streamable HTTP server (`--url`); the appended
+`http_headers` table carries the bearer token inline. Re-running is safe — the
+`codex mcp remove` line clears any previous entry first.
+
+> **Project scope requires trust.** Codex loads `./.codex/config.toml` only for
+> **trusted** projects. The project-local `CODEX_HOME` above is just how the CLI
+> writes that file; a plain `codex` run reads it once the folder is trusted. On
+> your first `codex` launch in the project, accept the trust prompt (or it is
+> already trusted if you have used Codex there before). To trust it
+> non-interactively, add `[projects."<absolute-project-path>"]` with
+> `trust_level = "trusted"` to `~/.codex/config.toml`. User scope needs no trust.
+
+### Useful commands
+
+```bash
+codex mcp list
+codex mcp get excalidash
+codex mcp remove excalidash
+```
+
+Start Codex with `codex`, then run `/mcp` inside Codex to confirm the
+`excalidash` server is enabled with its tools available.
+
+The Settings screen generates these same commands and substitutes the newly
+generated token only during the one-time display.
+
+### Advanced: manual config.toml
+
+Prefer the commands above. If you edit `config.toml` by hand, the equivalent
+block uses inline `http_headers` (never `bearer_token_env_var`):
 
 ```toml
 [mcp_servers.excalidash]
-url = "http://localhost:8000/mcp"
-bearer_token_env_var = "EXCALIDASH_API_KEY"
-tool_timeout_sec = 120
-startup_timeout_sec = 20
+url = "http://localhost:6767/mcp"
+http_headers = { "Authorization" = "Bearer exd_REPLACE_WITH_YOUR_API_KEY" }
 enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 300
 ```
-
-Export the API key in the shell that starts Codex:
-
-```bash
-export EXCALIDASH_API_KEY="exd_replace_with_your_api_key"
-codex
-```
-
-Inside Codex:
-
-```txt
-/mcp
-```
-
-The Settings screen provides buttons to copy the TOML block, environment
-command, or full setup script. It substitutes the newly generated token only
-during the one-time display.
 
 Official references:
 
 - [Codex MCP](https://developers.openai.com/codex/mcp)
-- [Codex config basics](https://developers.openai.com/codex/config-basic)
-- [Codex config reference](https://developers.openai.com/codex/config-reference)
+- [Codex configuration reference](https://developers.openai.com/codex/config-reference)
 
 ## Claude Code
 
@@ -78,13 +122,13 @@ Choose the scope that matches your use case:
 
 ```bash
 claude mcp add --transport http excalidash --scope local http://localhost:8000/mcp \
-  --header "Authorization: Bearer exd_replace_with_your_api_key"
+  --header "Authorization: Bearer exd_REPLACE_WITH_YOUR_API_KEY"
 
 claude mcp add --transport http excalidash --scope project http://localhost:8000/mcp \
-  --header "Authorization: Bearer exd_replace_with_your_api_key"
+  --header "Authorization: Bearer exd_REPLACE_WITH_YOUR_API_KEY"
 
 claude mcp add --transport http excalidash --scope user http://localhost:8000/mcp \
-  --header "Authorization: Bearer exd_replace_with_your_api_key"
+  --header "Authorization: Bearer exd_REPLACE_WITH_YOUR_API_KEY"
 ```
 
 - `local`: private to the current project.
@@ -105,7 +149,7 @@ Clients that use JSON configuration can start with:
       "type": "http",
       "url": "http://localhost:8000/mcp",
       "headers": {
-        "Authorization": "Bearer exd_replace_with_your_api_key"
+        "Authorization": "Bearer exd_REPLACE_WITH_YOUR_API_KEY"
       }
     }
   }
