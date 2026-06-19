@@ -16,7 +16,13 @@ import type {
   CreatedApiKey,
 } from "../../api";
 import { ConfirmModal } from "../../components/ConfirmModal";
-import { buildMcpUrl } from "./mcp";
+import {
+  buildCodexConfig,
+  buildCodexEnvCommand,
+  buildCodexFullSetup,
+  buildMcpUrl,
+  CODEX_TOKEN_PLACEHOLDER,
+} from "./mcp";
 
 const TOKEN_PLACEHOLDER = "<YOUR_API_KEY>";
 
@@ -36,6 +42,7 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
 type CopyButtonProps = {
   text: string;
   label: string;
+  buttonText?: string;
   copied: boolean;
   onCopy: (text: string, label: string) => void;
 };
@@ -43,6 +50,7 @@ type CopyButtonProps = {
 const CopyButton: React.FC<CopyButtonProps> = ({
   text,
   label,
+  buttonText,
   copied,
   onCopy,
 }) => (
@@ -53,7 +61,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({
     aria-label={label}
   >
     {copied ? <Check size={14} /> : <Copy size={14} />}
-    {copied ? "Copied" : "Copy"}
+    {copied ? "Copied" : buttonText || "Copy"}
   </button>
 );
 
@@ -73,6 +81,7 @@ export const ApiKeysCard: React.FC = () => {
 
   const mcpUrl = useMemo(() => buildMcpUrl(window.location.origin), []);
   const instructionToken = createdKey?.token || TOKEN_PLACEHOLDER;
+  const codexToken = createdKey?.token || CODEX_TOKEN_PLACEHOLDER;
 
   const claudeCommands = useMemo(
     () =>
@@ -101,6 +110,16 @@ export const ApiKeysCard: React.FC = () => {
         2,
       ),
     [instructionToken, mcpUrl],
+  );
+
+  const codexConfig = useMemo(() => buildCodexConfig(mcpUrl), [mcpUrl]);
+  const codexEnvCommand = useMemo(
+    () => buildCodexEnvCommand(codexToken),
+    [codexToken],
+  );
+  const codexFullSetup = useMemo(
+    () => buildCodexFullSetup(mcpUrl, codexToken),
+    [codexToken, mcpUrl],
   );
 
   useEffect(() => {
@@ -211,8 +230,8 @@ export const ApiKeysCard: React.FC = () => {
             <strong>25 auto-discovered MCP prompts</strong> (
             <code>/mcp__excalidash__…</code>), and{" "}
             <strong>25 optional Claude Code skills</strong> you can install
-            locally — use a key below as the Bearer token to connect Claude Code
-            or any MCP client.
+            locally — use a key below as the Bearer token to connect Codex,
+            Claude Code, or any MCP client.
           </p>
         </div>
       </div>
@@ -272,6 +291,7 @@ export const ApiKeysCard: React.FC = () => {
             className="w-full px-4 py-3 bg-white dark:bg-neutral-800 border-2 border-slate-200 dark:border-neutral-700 rounded-xl text-slate-900 dark:text-white outline-none focus:border-violet-400"
           >
             <option value="claude-code">Claude Code</option>
+            <option value="codex">Codex</option>
             <option value="other">Other</option>
           </select>
         </div>
@@ -365,6 +385,8 @@ export const ApiKeysCard: React.FC = () => {
                     <span className="px-2 py-0.5 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 text-[10px] font-black uppercase text-violet-700 dark:text-violet-300">
                       {key.client === "claude-code"
                         ? "Claude Code"
+                        : key.client === "codex"
+                          ? "Codex"
                         : "Other"}
                     </span>
                   </div>
@@ -401,13 +423,13 @@ export const ApiKeysCard: React.FC = () => {
 
       <div className="mt-7 border-t-2 border-slate-100 dark:border-neutral-800 pt-6">
         <div className="flex items-center gap-3">
-          {client === "claude-code" ? (
-            <Terminal
+          {client === "other" ? (
+            <Braces
               size={22}
               className="text-violet-600 dark:text-violet-400"
             />
           ) : (
-            <Braces
+            <Terminal
               size={22}
               className="text-violet-600 dark:text-violet-400"
             />
@@ -416,6 +438,8 @@ export const ApiKeysCard: React.FC = () => {
             <h3 className="font-bold text-slate-900 dark:text-white">
               {client === "claude-code"
                 ? "Claude Code setup"
+                : client === "codex"
+                  ? "Codex setup"
                 : "Other MCP clients"}
             </h3>
             <p className="text-xs font-medium text-slate-500 dark:text-neutral-400 break-all">
@@ -511,6 +535,73 @@ export const ApiKeysCard: React.FC = () => {
                 </code>
               </pre>
             </div>
+          </div>
+        ) : client === "codex" ? (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
+              Add this server to <code>~/.codex/config.toml</code> for your
+              global Codex configuration, or to <code>.codex/config.toml</code>{" "}
+              in a trusted project.
+            </p>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
+                  config.toml
+                </span>
+                <CopyButton
+                  text={codexConfig}
+                  label="Copy Codex config.toml"
+                  buttonText="Copy Codex config.toml"
+                  copied={copiedLabel === "Copy Codex config.toml"}
+                  onCopy={copyText}
+                />
+              </div>
+              <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
+                <code>{codexConfig}</code>
+              </pre>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
+                  Environment
+                </span>
+                <CopyButton
+                  text={codexEnvCommand}
+                  label="Copy Codex env command"
+                  buttonText="Copy Codex env command"
+                  copied={copiedLabel === "Copy Codex env command"}
+                  onCopy={copyText}
+                />
+              </div>
+              <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
+                <code>{codexEnvCommand}</code>
+              </pre>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">
+                  Full setup
+                </span>
+                <CopyButton
+                  text={codexFullSetup}
+                  label="Copy full Codex setup"
+                  buttonText="Copy full Codex setup"
+                  copied={copiedLabel === "Copy full Codex setup"}
+                  onCopy={copyText}
+                />
+              </div>
+              <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100">
+                <code>{codexFullSetup}</code>
+              </pre>
+            </div>
+
+            <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
+              Start Codex with <code>codex</code>, then run <code>/mcp</code>{" "}
+              inside Codex to inspect the connected server.
+            </p>
           </div>
         ) : (
           <div className="mt-4">

@@ -1,0 +1,31 @@
+{
+  "name": "@gabedsam01/excalidash-v2-skills",
+  "version": "0.1.0",
+  "description": "Agent Skills installer for ExcaliDash V2.",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "excalidash-v2-skills": "bin/excalidash-v2-skills.cjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "list": "node bin/excalidash-v2-skills.cjs --list",
+    "verify": "node bin/excalidash-v2-skills.cjs --verify",
+    "doctor": "node bin/excalidash-v2-skills.cjs --doctor",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepack": "node src/pack.cjs prepare",
+    "postpack": "node src/pack.cjs clean"
+  }
+}

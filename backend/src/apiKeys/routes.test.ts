@@ -148,6 +148,37 @@ describe("API key routes", () => {
     );
   });
 
+  it("accepts Codex as API key client metadata", async () => {
+    const { app, prisma } = buildApp();
+    prisma.apiKey.create.mockImplementation(async ({ data }: any) => ({
+      id: "key-codex",
+      name: data.name,
+      client: data.client,
+      prefix: data.prefix,
+      suffix: data.suffix,
+      createdAt: CREATED_AT,
+      lastUsedAt: null,
+    }));
+
+    const response = await request(app)
+      .post("/api-keys")
+      .set("x-test-user", "user-a")
+      .send({
+        name: "Codex",
+        client: "codex",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.client).toBe("codex");
+    expect(prisma.apiKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          client: "codex",
+        }),
+      }),
+    );
+  });
+
   it("soft-revokes an owned key so it is excluded from active listings", async () => {
     const { app, prisma } = buildApp();
     prisma.apiKey.updateMany.mockResolvedValue({ count: 1 });

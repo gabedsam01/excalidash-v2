@@ -141,6 +141,60 @@ describe("ApiKeysCard", () => {
     });
   });
 
+  it("shows copyable Codex config, environment command, and full setup", async () => {
+    render(<ApiKeysCard />);
+    await screen.findByText("No API keys yet");
+
+    fireEvent.change(screen.getByLabelText("MCP client"), {
+      target: { value: "codex" },
+    });
+
+    const expectedUrl = buildMcpUrl(window.location.origin);
+    expect(
+      screen.getAllByText(/\[mcp_servers\.excalidash\]/).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        /bearer_token_env_var = "EXCALIDASH_API_KEY"/,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(new RegExp(expectedUrl)).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/exd_replace_with_your_api_key/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/inside Codex to inspect/)).toHaveTextContent("/mcp");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy Codex config.toml" }),
+    );
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining("[mcp_servers.excalidash]"),
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy Codex env command" }),
+    );
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        'export EXCALIDASH_API_KEY="exd_replace_with_your_api_key"',
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy full Codex setup" }),
+    );
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining("mkdir -p ~/.codex"),
+      );
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining("codex"),
+      );
+    });
+  });
+
   it("revokes a key and removes it from the active list", async () => {
     apiMocks.getApiKeys.mockResolvedValue([existingKey]);
     render(<ApiKeysCard />);

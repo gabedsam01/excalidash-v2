@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-// install-skills.cjs — Thin wrapper around the excalidash-claude-skills installer.
+// install-skills.cjs — Thin wrapper around the ExcaliDash V2 skills installer.
 //
 // Usage:
 //   node install-skills.cjs [args...]
 //
-// Locates the bundled installer at
-//   ../../../packages/excalidash-claude-skills/bin/install.cjs
-// (relative to this script) and executes it, forwarding all CLI arguments.
+// Locates the installer either in a repository checkout or in the published
+// package bundle and executes it, forwarding all CLI arguments.
 //
 // If the installer is not present (e.g. running from a checkout without the
 // packages workspace), it prints the documented npx/node commands to run the
@@ -22,34 +21,36 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const INSTALLER = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'packages',
-  'excalidash-claude-skills',
-  'bin',
-  'install.cjs'
-);
+const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const INSTALLER_CANDIDATES = [
+  path.join(
+    PACKAGE_ROOT,
+    'packages',
+    'excalidash-v2-skills',
+    'bin',
+    'excalidash-v2-skills.cjs'
+  ),
+  path.join(PACKAGE_ROOT, 'bin', 'excalidash-v2-skills.cjs'),
+];
+const INSTALLER = INSTALLER_CANDIDATES.find((candidate) => fs.existsSync(candidate));
 
 function printFallback() {
   process.stdout.write(
     [
-      'excalidash-claude-skills installer not found at:',
-      `  ${INSTALLER}`,
+      'ExcaliDash V2 skills installer not found at:',
+      ...INSTALLER_CANDIDATES.map((candidate) => `  ${candidate}`),
       '',
       'Run the published installer instead:',
       '',
       '  # via npx (no install):',
-      '  npx excalidash-claude-skills install',
+      '  npx -y @gabedsam01/excalidash-v2-skills --local',
       '',
       '  # or install globally, then run:',
-      '  npm install -g excalidash-claude-skills',
-      '  excalidash-claude-skills install',
+      '  npm install -g @gabedsam01/excalidash-v2-skills',
+      '  excalidash-v2-skills --local',
       '',
       '  # or run a locally cloned package directly:',
-      '  node packages/excalidash-claude-skills/bin/install.cjs',
+      '  node packages/excalidash-v2-skills/bin/excalidash-v2-skills.cjs --local',
       '',
     ].join('\n')
   );
@@ -58,7 +59,7 @@ function printFallback() {
 function main() {
   const forwarded = process.argv.slice(2);
 
-  if (!fs.existsSync(INSTALLER)) {
+  if (!INSTALLER) {
     printFallback();
     process.exit(0);
   }

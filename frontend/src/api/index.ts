@@ -27,7 +27,7 @@ export type UpdateInfo = {
   error?: string;
 };
 
-export type ApiKeyClient = "claude-code" | "other";
+export type ApiKeyClient = "claude-code" | "codex" | "other";
 
 export type ApiKeySummary = {
   id: string;

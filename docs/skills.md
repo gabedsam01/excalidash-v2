@@ -1,107 +1,191 @@
-# ExcaliDash Claude Code skills
+# ExcaliDash V2 Agent Skills
 
-ExcaliDash ships **25 Claude Code skills** under [`skills/excalidash/`](../skills/excalidash).
-Each is a focused, geometry-aware playbook for one diagram type that drives the
-MCP quality flow (plan → generate → lint → score → repair → validate → save →
-export) to a passing score (≥ 95) with library policy and secret redaction baked
-in.
+ExcaliDash V2 provides 25 Agent Skills for creating, reviewing, improving,
+validating, and exporting Excalidraw diagrams through agent workflows. The
+skills are stored in [`skills/excalidash/`](../skills/excalidash) and can be
+installed for Claude Code, Codex, and agents that support the common
+`.agents/skills` convention.
 
-## Prompts vs. skills (important)
+ExcaliDash V2 preserves credit to the original ExcaliDash project by
+ZimengXiong.
 
-- **MCP prompts** appear automatically after `claude mcp add` as
-  `/mcp__excalidash__*` commands — no install needed (see [mcp.md](mcp.md)).
-- **Claude Code skills** are local files Claude Code loads from a skills
-  directory. `claude mcp add` does **not** copy them. You install/copy them with
-  the bundled CLI below.
+## Skills and MCP prompts
 
-## Install
+Agent Skills and MCP prompts are separate:
 
-```bash
-# user scope → ~/.claude/skills/excalidash/*
-npx -y @excalidash/claude-skills install --scope user
+- MCP prompts and tools are discovered by an MCP client after it connects to
+  the ExcaliDash endpoint, such as `http://localhost:3000/mcp`.
+- Agent Skills are local directories that contain instructions and supporting
+  files. They must be installed into an agent skills directory.
 
-# project/local scope → <project>/.claude/skills/excalidash/*
-npx -y @excalidash/claude-skills install --scope project --project-dir .
+Installing skills does not configure an MCP connection or copy credentials.
 
-# local fallback (no npm publish needed), from this repo:
-node packages/excalidash-claude-skills/bin/install.cjs install --scope user
-node packages/excalidash-claude-skills/bin/install.cjs install --scope project --project-dir .
-```
+## Skill structure
 
-Other CLI commands:
+Each valid skill is its own directory:
 
-```bash
-excalidash-skills list                                  # list the 25 skills
-excalidash-skills install --scope user                  # copy to ~/.claude/skills
-excalidash-skills install --scope project --project-dir .  # copy to ./.claude/skills
-excalidash-skills uninstall --scope user                # remove
-excalidash-skills verify                                # check 25 + _shared, frontmatter, no placeholders, structure
-```
-
-Scopes:
-
-| Scope | Target |
-| --- | --- |
-| `user` | `~/.claude/skills/excalidash/*` |
-| `project` / `local` | `<project-dir>/.claude/skills/excalidash/*` |
-
-After installing, restart Claude Code so it picks up the new skills.
-
-## The 25 skills
-
-```
-excalidash-diagram-director          excalidash-design-polisher
-excalidash-visual-lint-repair-loop   excalidash-library-curator
-excalidash-c4-context                excalidash-c4-container
-excalidash-clean-architecture-reviewer
-excalidash-hexagonal-architecture-mapper
-excalidash-ddd-bounded-contexts      excalidash-event-driven-diagrammer
-excalidash-cqrs-diagrammer           excalidash-microservices-topology
-excalidash-modular-monolith          excalidash-repo-to-system-design
-excalidash-n8n-workflow-diagrammer   excalidash-database-dataflow
-excalidash-security-architecture     excalidash-auth-api-key-boundaries
-excalidash-observability-flow        excalidash-devops-cloud-deployment
-excalidash-ai-mcp-architecture       excalidash-llm-rag-pipeline
-excalidash-ui-wireframe-dashboard    excalidash-portfolio-polished-diagram
-excalidash-troubleshooting-swimlane
-```
-
-Each skill directory contains:
-
-```
-<skill>/
-  SKILL.md                 # frontmatter (name, description, allowed-tools) + workflow
+```txt
+excalidash-c4-context/
+  SKILL.md
   references/
-    checklist.md           # pre-save checklist
-    examples.md            # worked tool-call sequences
-    anti-patterns.md       # what the lint/score engine catches
   scripts/
-    smoke.cjs              # doc-smoke: prints the MCP prompt + tool sequence
+  assets/        # when the skill provides assets
 ```
 
-Each skill name maps 1:1 to the matching MCP prompt
-(`excalidash-c4-context` ↔ `/mcp__excalidash__excalidash_c4_context`).
+`SKILL.md` contains the main instructions and optional YAML frontmatter.
+References, scripts, and assets are loaded only when needed by the agent.
 
-## Shared references & scripts
+The `_shared/` directory contains reusable references and scripts:
 
-`skills/excalidash/_shared/` holds content reused by every skill:
-
-```
-_shared/references/   visual-system.md, geometry-rules.md, library-policy.md,
-                      architecture-patterns.md, security-redaction.md,
-                      mcp-tool-cheatsheet.md, prompt-patterns.md
-_shared/scripts/      verify-mcp.cjs, export-drawing.cjs, inspect-excalidraw.cjs,
-                      score-fixture.cjs, install-skills.cjs
+```txt
+_shared/
+  references/
+  scripts/
 ```
 
-`verify-mcp.cjs` (given `EXCALIDASH_MCP_URL` + `EXCALIDASH_TOKEN`) asserts the
-live server returns exactly 25 tools and 25 prompts.
+It is installed with every skill selection because skills refer to it, but it
+is not itself a skill and is not included in `--list`.
 
-## Troubleshooting
+## Install via npx
 
-- **Skills not appearing** — confirm they were copied (`excalidash-skills verify`),
-  then restart Claude Code. `claude mcp add` alone does not install skills.
-- **Allowed-tools missing** — each `SKILL.md` lists `allowed-tools`; the MCP must
-  be connected so those `mcp__excalidash__*` tools resolve.
-- **`npx` can't find the package** — until it's published, use the local fallback
-  `node packages/excalidash-claude-skills/bin/install.cjs …` from this repo.
+Install in the current project:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --local
+```
+
+Install for the current user:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --user
+```
+
+Install in another project:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --project ./meu-projeto
+```
+
+The CLI requires one explicit target for installation. Running it without
+arguments prints help and makes no changes.
+
+## Supported paths
+
+| Target | Claude Code | Codex/universal agents |
+| --- | --- | --- |
+| `--local` | `./.claude/skills/` | `./.agents/skills/` |
+| `--user` | `~/.claude/skills/` | `~/.agents/skills/` |
+| `--project ./meu-projeto` | `./meu-projeto/.claude/skills/` | `./meu-projeto/.agents/skills/` |
+
+Skills are installed directly inside each skills directory:
+
+```txt
+.claude/skills/excalidash-diagram-director/SKILL.md
+.claude/skills/excalidash-c4-context/SKILL.md
+.claude/skills/_shared/references/
+
+.agents/skills/excalidash-diagram-director/SKILL.md
+.agents/skills/excalidash-c4-context/SKILL.md
+.agents/skills/_shared/references/
+```
+
+There is no intermediate `skills/excalidash/` directory.
+
+## Claude Code
+
+Install only the Claude Code path:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --local --agent claude-code
+```
+
+This writes to `.claude/skills`. Restart or reload Claude Code after
+installation if the skills are not detected immediately.
+
+## Codex and universal agents
+
+Install only the common `.agents/skills` path:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --local --agent codex
+```
+
+`--agent universal` uses the same destination:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --local --agent universal
+```
+
+The default, `--agent all`, installs both `.claude/skills` and
+`.agents/skills`.
+
+## Install selected skills
+
+Without `--skill`, all valid skills are installed. Repeat `--skill` to select a
+subset:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --local \
+  --skill excalidash-c4-context \
+  --skill excalidash-c4-container
+```
+
+`_shared` is copied with any selection.
+
+## List available skills
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --list
+```
+
+The list is generated from directories that contain a non-empty `SKILL.md`;
+`_shared` is excluded.
+
+## Verify
+
+Verify the skills bundled in the npm package:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --verify
+```
+
+Verify a local installation:
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --verify --local
+```
+
+Verification checks:
+
+- required `SKILL.md` files and non-empty content;
+- minimal YAML frontmatter validity when frontmatter is present;
+- referenced `references/` and `scripts/` directories;
+- symbolic links and obvious executable binary formats;
+- the installation manifest and recorded directory hashes.
+
+Skill scripts are never executed during installation or verification.
+
+## Remove
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --uninstall --local
+```
+
+Each destination contains
+`.excalidash-v2-skills-manifest.json`. Uninstall removes only directories
+recorded in that manifest. If an installed directory changed after
+installation, it is kept unless `--force` is supplied.
+
+## Diagnostics and automation
+
+```bash
+npx -y @gabedsam01/excalidash-v2-skills --doctor --local
+npx -y @gabedsam01/excalidash-v2-skills --local --dry-run
+npx -y @gabedsam01/excalidash-v2-skills --list --json
+```
+
+`--doctor` reports Node.js and package versions, resolved target directories,
+write permissions, available skills, installed skills, and detected problems.
+
+Use placeholder credentials such as `YOUR_API_TOKEN` in examples and keep
+local MCP testing on `http://localhost:3000/mcp`.

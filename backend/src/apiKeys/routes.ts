@@ -5,7 +5,7 @@ import { generateApiKey } from "./service";
 
 const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(100),
-  client: z.enum(["claude-code", "other"]).optional(),
+  client: z.enum(["claude-code", "codex", "other"]).optional(),
 });
 
 type ApiKeyRouteDeps = {

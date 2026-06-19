@@ -86,6 +86,6 @@ The 25 MCP prompts are named 1:1 with the 25 installable skills. After
 ```
 
 > Prompts are delivered by the MCP server (no install). The matching **skills**
-> are local files installed with `@excalidash/claude-skills` — each skill name
-> maps 1:1 to the prompt above (`excalidash-c4-context` ↔
+> are local files installed with `@gabedsam01/excalidash-v2-skills` — each
+> skill name maps 1:1 to the prompt above (`excalidash-c4-context` ↔
 > `/mcp__excalidash__excalidash_c4_context`).
