@@ -49,6 +49,22 @@ const DIMENSION_WEIGHT: Record<QualityDimension, number> = {
 };
 
 /**
+ * Fold DIMENSION_WEIGHT into the headline number: a penalty in a heavy
+ * dimension (layout/containment) moves the score more than one in a light
+ * dimension (consistency). Factors are normalized so the average is 1.0, which
+ * keeps overall score magnitudes comparable to the old flat sum.
+ */
+const AVG_DIMENSION_WEIGHT =
+  Object.values(DIMENSION_WEIGHT).reduce((sum, w) => sum + w, 0) /
+  Object.keys(DIMENSION_WEIGHT).length;
+
+const dimensionFactor = (dimension: QualityDimension): number =>
+  DIMENSION_WEIGHT[dimension] / AVG_DIMENSION_WEIGHT;
+
+const weightedPenalty = (issue: LintIssue): number =>
+  PENALTY[issue.severity] * dimensionFactor(issue.dimension);
+
+/**
  * Codes that, when present as errors, hard-cap the score below the passing bar.
  * These are the mathematically-proven "the drawing is broken" defects.
  */
@@ -94,6 +110,13 @@ const SUGGESTION: Record<string, string> = {
   NO_LIBRARY_USAGE: "Add curated library/icon items in card icon slots.",
   RECTANGLE_ONLY: "Use icons/symbols/library items instead of bare rectangles.",
   MISSING_LEGEND: "Add a legend explaining the symbols and zones.",
+  STYLE_DRIFT: "Lock one stroke/roughness/font family across the diagram.",
+  TOO_MANY_COLORS: "Reduce to at most 3 hue families; tint by layer.",
+  LOW_CONTRAST: "Raise text/background contrast to at least WCAG AA (4.5:1).",
+  MISSING_ICON: "Inject the matching library/icon glyph into the recognized node.",
+  TYPO_HIERARCHY: "Make the title clearly larger than labels (title>label>caption).",
+  DENSE_CONNECTORS: "Reduce connector density or group related edges.",
+  EDGE_CROSSING_HEAVY: "Reroute connectors through lanes to cut crossings.",
 };
 
 /** Order in which the repair plan should attack issues (highest first). */
@@ -112,8 +135,15 @@ const PLAN_ORDER = [
   "TEXT_NEAR_EDGE",
   "OFF_GRID",
   "HIGH_DENSITY",
+  "DENSE_CONNECTORS",
+  "EDGE_CROSSING_HEAVY",
   "NO_LIBRARY_USAGE",
+  "MISSING_ICON",
   "RECTANGLE_ONLY",
+  "TOO_MANY_COLORS",
+  "STYLE_DRIFT",
+  "LOW_CONTRAST",
+  "TYPO_HIERARCHY",
   "MISSING_LEGEND",
 ];
 
@@ -169,7 +199,7 @@ export const scoreIssues = (
   minimumScore: number,
 ): DrawingScore => {
   const totalPenalty = issues.reduce(
-    (sum, issue) => sum + PENALTY[issue.severity],
+    (sum, issue) => sum + weightedPenalty(issue),
     0,
   );
   let score = Math.max(0, Math.min(100, Math.round(100 - totalPenalty)));

@@ -28,6 +28,12 @@ import {
   unionBBox,
 } from "../geometry/geometry";
 import { isLibraryElement, isLegendElement, metaOf } from "../libraries/metadata";
+import {
+  detectLowContrast,
+  detectMissingIcon,
+  detectStyleDrift,
+  detectTypoHierarchy,
+} from "./style";
 
 /** Decorative elements (icons, legend swatches, badges, symbols) are exempt
  *  from card-size / proportion checks — they're intentionally small/varied. */
@@ -59,11 +65,20 @@ export interface LintOptions {
   expectRichArchitecture: boolean;
   /** When true, a flow/architecture with no legend is flagged. */
   requireLegend: boolean;
+  /** Aesthetic gates (default off; the architecture create path opts in). */
+  /** Flag >3 hue families / mixed roughness / mixed fonts (STYLE_DRIFT, TOO_MANY_COLORS). */
+  enforceStyleTokens: boolean;
+  /** Flag text/background contrast below WCAG AA (LOW_CONTRAST). */
+  enforceContrast: boolean;
+  /** Flag recognized nodes drawn with no icon (MISSING_ICON). */
+  requireIcons: boolean;
+  /** Flag weak title>label>caption hierarchy (TYPO_HIERARCHY). */
+  enforceTypography: boolean;
 }
 
 export const DEFAULT_LINT_OPTIONS: LintOptions = {
   gridSize: 20,
-  minFontSize: 14,
+  minFontSize: 16,
   containerPadding: 4,
   overlapThreshold: 0.15,
   densityCellSize: 220,
@@ -78,6 +93,10 @@ export const DEFAULT_LINT_OPTIONS: LintOptions = {
   libraryRequiredSeverity: "warning",
   expectRichArchitecture: false,
   requireLegend: false,
+  enforceStyleTokens: false,
+  enforceContrast: false,
+  requireIcons: false,
+  enforceTypography: false,
 };
 
 const num = (v: unknown, f = 0): number =>
@@ -612,6 +631,11 @@ export const lintScene = (
   for (const { flag, detector } of GATED_DETECTORS) {
     if (opts[flag]) issues.push(...detector(elements, opts));
   }
+  // Aesthetic (non-geometry) gated detectors — opt-in.
+  if (opts.enforceStyleTokens) issues.push(...detectStyleDrift(elements));
+  if (opts.requireIcons) issues.push(...detectMissingIcon(elements));
+  if (opts.enforceTypography) issues.push(...detectTypoHierarchy(elements));
+  if (opts.enforceContrast) issues.push(...detectLowContrast(scene, elements));
   return issues;
 };
 
