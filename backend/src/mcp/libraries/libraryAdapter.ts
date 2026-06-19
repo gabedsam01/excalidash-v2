@@ -21,6 +21,14 @@ import {
 import type { CatalogService } from "../../libraries/catalogService";
 import type { DownloadService } from "../../libraries/downloadService";
 import type { LibrarySearchMode } from "../../libraries/types";
+import {
+  BUNDLED_LIBRARY_ID,
+  BUNDLED_LIBRARY_NAME,
+  buildBundledLibraryDocument,
+  bundledCatalogDescriptor,
+  bundledItemNames,
+  isBundledId,
+} from "../../libraries/bundled";
 
 export interface LibraryItemDocument {
   name: string;
@@ -46,20 +54,48 @@ const newIdFactory = () => {
 export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
   const { catalogService, downloadService, cacheDir } = deps;
 
-  const search = (params: {
+  const search = async (params: {
     query?: string;
     mode?: LibrarySearchMode;
     category?: string;
     limit?: number;
-  }) =>
-    catalogService.search({
+  }) => {
+    const result = await catalogService.search({
       query: params.query,
       mode: params.mode ?? (deps.defaultMode as LibrarySearchMode),
       category: params.category,
       limit: params.limit,
     });
+    // Offline fallback: when the remote catalog is empty / has no match, surface
+    // the always-available bundled icon pack so callers never hit a dead end.
+    if (result.count === 0) {
+      const dto = bundledCatalogDescriptor();
+      return {
+        ...result,
+        count: 1,
+        results: [
+          { ...dto, cached: true, sourceMode: "core" },
+        ] as unknown as typeof result.results,
+        warning:
+          result.warning ??
+          "Remote catalog empty/no match — showing the bundled offline icon pack.",
+      };
+    }
+    return result;
+  };
 
   const inspect = async (id: string, autoCache = false) => {
+    if (isBundledId(id)) {
+      return {
+        id: BUNDLED_LIBRARY_ID,
+        source: BUNDLED_LIBRARY_ID,
+        name: BUNDLED_LIBRARY_NAME,
+        cached: true,
+        itemCount: bundledItemNames().length,
+        itemNames: bundledItemNames(),
+        provenance: "bundled",
+      };
+    }
     const dto = await catalogService.getById(id);
     if (!dto) throw notFound(`Library not found: ${id}`);
     if (!dto.cached && !autoCache) {
@@ -73,10 +109,27 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     return { ...dto, cached: true, itemCount: items.itemCount, itemNames: items.itemNames };
   };
 
-  const cache = (id: string) => downloadService.cacheLibrary(id);
+  const cache = (id: string) => {
+    if (isBundledId(id)) {
+      return Promise.resolve({
+        id: BUNDLED_LIBRARY_ID,
+        source: BUNDLED_LIBRARY_ID,
+        cached: true,
+        itemCount: bundledItemNames().length,
+        fromBundle: true,
+      });
+    }
+    return downloadService.cacheLibrary(id);
+  };
 
   /** Ensure cached, then read + parse the raw `.excalidrawlib` document. */
   const getDocument = async (id: string): Promise<LibraryItemDocument[]> => {
+    if (isBundledId(id)) {
+      return buildBundledLibraryDocument().libraryItems.map((item) => ({
+        name: item.name,
+        elements: item.elements as unknown as ExcalidrawElement[],
+      }));
+    }
     const dto = await catalogService.getById(id);
     if (!dto) throw notFound(`Library not found: ${id}`);
     const cachePath = resolveCachePath(cacheDir, dto.source);
