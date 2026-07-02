@@ -2,8 +2,8 @@
 
 ExcaliDash V2 is a self-hosted dashboard and organizer for Excalidraw drawings.
 It provides collections, search, import/export, live collaboration, local or
-OIDC authentication, API keys, curated libraries, and an MCP server for
-AI-agent workflows.
+OIDC authentication, API keys, personal user templates/libraries, and an MCP
+server for AI-agent workflows.
 
 ## Credits
 
@@ -11,7 +11,7 @@ ExcaliDash V2 is an evolved fork of the original
 [ExcaliDash](https://github.com/ZimengXiong/ExcaliDash) project by
 ZimengXiong. This repository preserves the upstream attribution and license
 while extending the project with PostgreSQL-only runtime storage, MCP tooling,
-API keys, curated libraries, and deployment improvements.
+API keys, user-owned template/library workflows, and deployment improvements.
 
 ## Database
 
@@ -19,6 +19,20 @@ PostgreSQL is required at runtime. SQLite was removed from the runtime and is
 mentioned only for legacy migration context. PostgreSQL provides reliable
 production persistence, consistent migrations, concurrent access, and
 predictable deployments.
+
+### Personal templates only
+
+The old curated/public Excalidraw catalog tables are intentionally removed. On
+upgrade, the migration `20260702180000_drop_curated_libraries` drops the legacy
+curated-library tables if they exist:
+
+- `ExcalidrawLibraryCatalogItem`
+- `ExcalidrawLibraryPack`
+- `ExcalidrawLibraryPackItem`
+
+User-owned templates are kept through the existing `Library` table and `/library`
+endpoint. In plain Portuguese: sai biblioteca curada do projeto original, entra
+a biblioteca do dono da instância. Bem mais limpo.
 
 ## Fast install with GHCR
 

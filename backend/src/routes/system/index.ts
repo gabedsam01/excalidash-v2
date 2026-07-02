@@ -1,5 +1,4 @@
 import express from "express";
-import { registerUpdateRoutes } from "./update";
 import { registerRuntimeConfigRoutes } from "./runtimeConfig";
 import type { Config } from "../../config";
 
@@ -13,6 +12,5 @@ export type SystemRouteDeps = {
 };
 
 export const registerSystemRoutes = (app: express.Express, deps: SystemRouteDeps) => {
-  registerUpdateRoutes(app, deps);
   registerRuntimeConfigRoutes(app, deps);
 };
