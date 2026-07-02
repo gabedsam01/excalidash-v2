@@ -9,8 +9,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { sanitizeDrawingData } from "../security";
 import { redactDrawingData } from "./security/redaction";
-import { createLibraryServices } from "../libraries";
-import type { LibraryConfig, LibraryPrisma } from "../libraries/types";
+import type { LibraryConfig } from "../libraries/types";
 import type { McpConfig } from "./types";
 import type { SnapshotConfig } from "../config";
 import { createDrawingService } from "./drawings/drawingService";
@@ -88,21 +87,6 @@ export const registerMcpServer = (
       >,
   });
 
-  const libraryServices = createLibraryServices({
-    prisma: prisma as unknown as LibraryPrisma,
-    config: config.libraries,
-  });
-  const libraryAdapter = createLibraryAdapter({
-    catalogService: libraryServices.catalogService,
-    downloadService: libraryServices.downloadService,
-    cacheDir: config.libraries.cacheDir,
-    defaultMode:
-      mcp.defaultLibraryMode === "curated"
-        ? "all"
-        : (mcp.defaultLibraryMode as "core" | "specialized" | "public" | "all"),
-    publicSearchEnabled: mcp.publicSearchEnabled,
-  });
-
   const limiter = rateLimit({
     windowMs: Math.max(1, mcp.rateLimitWindowSeconds) * 1000,
     max: mcp.rateLimitMax,
@@ -146,7 +130,10 @@ export const registerMcpServer = (
         principal,
         config: mcp,
         drawingService,
-        libraryAdapter,
+        libraryAdapter: createLibraryAdapter({
+          prisma,
+          userId: principal.userId,
+        }),
       };
 
       const body = req.body;
