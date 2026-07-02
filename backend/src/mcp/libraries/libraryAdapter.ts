@@ -1,14 +1,10 @@
 /**
- * Library adapter for MCP tools. Wraps the existing curated-library services
- * (search/inspect/cache) and adds canvas placement: reading a cached
- * `.excalidrawlib`, selecting items, regenerating ids, offsetting and
- * (optionally) normalizing them onto a target scene.
+ * MCP library adapter backed by the authenticated user's personal Excalidraw
+ * library (`/library`) instead of the removed curated/public catalog.
  */
-import { promises as fs } from "fs";
 import crypto from "crypto";
 import type { ExcalidrawElement, ExcalidrawScene } from "../types";
-import { notFound, invalid } from "../errors";
-import { resolveCachePath, safeJsonParse } from "../../libraries/validators";
+import { invalid, notFound } from "../errors";
 import { unionBBox, snapToGrid } from "../geometry/geometry";
 import {
   cardBoxById,
@@ -18,17 +14,6 @@ import {
   tagItemElements,
   type Placement,
 } from "./placement";
-import type { CatalogService } from "../../libraries/catalogService";
-import type { DownloadService } from "../../libraries/downloadService";
-import type { LibrarySearchMode } from "../../libraries/types";
-import {
-  BUNDLED_LIBRARY_ID,
-  BUNDLED_LIBRARY_NAME,
-  buildBundledLibraryDocument,
-  bundledCatalogDescriptor,
-  bundledItemNames,
-  isBundledId,
-} from "../../libraries/bundled";
 
 export interface LibraryItemDocument {
   name: string;
@@ -36,12 +21,15 @@ export interface LibraryItemDocument {
 }
 
 export interface LibraryAdapterDeps {
-  catalogService: CatalogService;
-  downloadService: DownloadService;
-  cacheDir: string;
-  defaultMode: LibrarySearchMode;
-  publicSearchEnabled: boolean;
+  prisma: {
+    library: {
+      findUnique(args: { where: { id: string } }): Promise<{ id: string; items: string } | null>;
+    };
+  };
+  userId: string;
 }
+
+const PERSONAL_LIBRARY_ID = "personal";
 
 const newIdFactory = () => {
   let counter = 0;
@@ -51,120 +39,132 @@ const newIdFactory = () => {
   };
 };
 
-export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
-  const { catalogService, downloadService, cacheDir } = deps;
-
-  const search = async (params: {
-    query?: string;
-    mode?: LibrarySearchMode;
-    category?: string;
-    limit?: number;
-  }) => {
-    const result = await catalogService.search({
-      query: params.query,
-      mode: params.mode ?? (deps.defaultMode as LibrarySearchMode),
-      category: params.category,
-      limit: params.limit,
-    });
-    // Offline fallback: when the remote catalog is empty / has no match, surface
-    // the always-available bundled icon pack so callers never hit a dead end.
-    if (result.count === 0) {
-      const dto = bundledCatalogDescriptor();
-      return {
-        ...result,
-        count: 1,
-        results: [
-          { ...dto, cached: true, sourceMode: "core" },
-        ] as unknown as typeof result.results,
-        warning:
-          result.warning ??
-          "Remote catalog empty/no match — showing the bundled offline icon pack.",
-      };
-    }
-    return result;
-  };
-
-  const inspect = async (id: string, autoCache = false) => {
-    if (isBundledId(id)) {
-      return {
-        id: BUNDLED_LIBRARY_ID,
-        source: BUNDLED_LIBRARY_ID,
-        name: BUNDLED_LIBRARY_NAME,
-        cached: true,
-        itemCount: bundledItemNames().length,
-        itemNames: bundledItemNames(),
-        provenance: "bundled",
-      };
-    }
-    const dto = await catalogService.getById(id);
-    if (!dto) throw notFound(`Library not found: ${id}`);
-    if (!dto.cached && !autoCache) {
-      return {
-        ...dto,
-        cached: false,
-        hint: "Library is not cached. Call cache_library (or pass autoCache=true) to inspect its items.",
-      };
-    }
-    const items = await downloadService.getItems(id);
-    return { ...dto, cached: true, itemCount: items.itemCount, itemNames: items.itemNames };
-  };
-
-  const cache = (id: string) => {
-    if (isBundledId(id)) {
-      return Promise.resolve({
-        id: BUNDLED_LIBRARY_ID,
-        source: BUNDLED_LIBRARY_ID,
-        cached: true,
-        itemCount: bundledItemNames().length,
-        fromBundle: true,
-      });
-    }
-    return downloadService.cacheLibrary(id);
-  };
-
-  /** Ensure cached, then read + parse the raw `.excalidrawlib` document. */
-  const getDocument = async (id: string): Promise<LibraryItemDocument[]> => {
-    if (isBundledId(id)) {
-      return buildBundledLibraryDocument().libraryItems.map((item) => ({
-        name: item.name,
-        elements: item.elements as unknown as ExcalidrawElement[],
-      }));
-    }
-    const dto = await catalogService.getById(id);
-    if (!dto) throw notFound(`Library not found: ${id}`);
-    const cachePath = resolveCachePath(cacheDir, dto.source);
-    let text: string | null = null;
-    try {
-      text = await fs.readFile(cachePath, "utf8");
-    } catch {
-      await downloadService.cacheLibrary(id);
-      text = await fs.readFile(cachePath, "utf8");
-    }
-    const parsed = safeJsonParse<Record<string, unknown>>(text);
-    if (!parsed.ok || !parsed.value) {
-      throw invalid(`Cached library is not valid JSON: ${dto.source}`);
-    }
-    const data = parsed.value;
-    if (Array.isArray(data.libraryItems)) {
-      return (data.libraryItems as Array<Record<string, unknown>>).map(
-        (item, index) => ({
-          name:
-            typeof item.name === "string" && item.name
-              ? item.name
-              : `Item ${index + 1}`,
-          elements: Array.isArray(item.elements)
-            ? (item.elements as ExcalidrawElement[])
-            : [],
-        }),
-      );
-    }
-    if (Array.isArray(data.library)) {
-      return (data.library as ExcalidrawElement[][]).map((elements, index) => ({
-        name: `Item ${index + 1}`,
-        elements: Array.isArray(elements) ? elements : [],
-      }));
-    }
+const parseItems = (raw: string | null | undefined): unknown[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
     return [];
+  }
+};
+
+const textPreview = (elements: ExcalidrawElement[]): string | null => {
+  const text = elements.find((el) => typeof (el as { text?: unknown }).text === "string") as
+    | { text?: string }
+    | undefined;
+  const value = text?.text?.trim();
+  return value ? value.slice(0, 80) : null;
+};
+
+const itemToDocument = (item: unknown, index: number): LibraryItemDocument | null => {
+  let elements: ExcalidrawElement[] = [];
+  let explicitName: string | null = null;
+
+  if (Array.isArray(item)) {
+    elements = item as ExcalidrawElement[];
+  } else if (item && typeof item === "object") {
+    const record = item as Record<string, unknown>;
+    if (Array.isArray(record.elements)) {
+      elements = record.elements as ExcalidrawElement[];
+    } else if (Array.isArray(record.libraryItems)) {
+      const nested = record.libraryItems[index] as Record<string, unknown> | undefined;
+      if (nested && Array.isArray(nested.elements)) {
+        elements = nested.elements as ExcalidrawElement[];
+      }
+    }
+    if (typeof record.name === "string" && record.name.trim()) {
+      explicitName = record.name.trim();
+    }
+  }
+
+  if (!Array.isArray(elements) || elements.length === 0) return null;
+  return {
+    name: explicitName ?? textPreview(elements) ?? `Personal template ${index + 1}`,
+    elements,
+  };
+};
+
+export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
+  const userLibraryId = `user_${deps.userId}`;
+
+  const getDocument = async (id = PERSONAL_LIBRARY_ID): Promise<LibraryItemDocument[]> => {
+    if (id !== PERSONAL_LIBRARY_ID && id !== userLibraryId) {
+      throw notFound(`Personal library not found: ${id}`);
+    }
+
+    const library = await deps.prisma.library.findUnique({ where: { id: userLibraryId } });
+    const items = parseItems(library?.items);
+    return items
+      .map((item, index) => itemToDocument(item, index))
+      .filter((item): item is LibraryItemDocument => Boolean(item));
+  };
+
+  const search = async (params: { query?: string; limit?: number }) => {
+    const documents = await getDocument(PERSONAL_LIBRARY_ID);
+    const query = params.query?.trim().toLowerCase() ?? "";
+    const filtered = query
+      ? documents.filter((item) => item.name.toLowerCase().includes(query))
+      : documents;
+    const limited = filtered.slice(0, params.limit ?? 25);
+
+    if (limited.length === 0) {
+      return {
+        mode: "personal",
+        query,
+        category: null,
+        publicSearchEnabled: false,
+        count: 0,
+        results: [],
+        warning: "No personal templates found. Save templates in your Excalidraw personal library first.",
+      };
+    }
+
+    return {
+      mode: "personal",
+      query,
+      category: null,
+      publicSearchEnabled: false,
+      count: 1,
+      results: [
+        {
+          id: PERSONAL_LIBRARY_ID,
+          name: "Personal Library",
+          slug: PERSONAL_LIBRARY_ID,
+          description: "Templates saved by the authenticated user in ExcaliDash/Excalidraw.",
+          sourceMode: "personal",
+          category: "personal",
+          curated: false,
+          source: userLibraryId,
+          itemNames: limited.map((item) => item.name),
+          cached: true,
+        },
+      ],
+    };
+  };
+
+  const inspect = async (id: string) => {
+    const documents = await getDocument(id);
+    return {
+      id: PERSONAL_LIBRARY_ID,
+      source: userLibraryId,
+      name: "Personal Library",
+      cached: true,
+      itemCount: documents.length,
+      itemNames: documents.map((item) => item.name),
+      provenance: "user-personal-library",
+    };
+  };
+
+  const cache = async (id: string) => {
+    const documents = await getDocument(id);
+    return {
+      id: PERSONAL_LIBRARY_ID,
+      source: userLibraryId,
+      cached: true,
+      itemCount: documents.length,
+      fromUserLibrary: true,
+    };
   };
 
   const selectItems = (
@@ -173,19 +173,14 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
   ): LibraryItemDocument[] => {
     let chosen = documents;
     if (selection.itemNames && selection.itemNames.length > 0) {
-      const wanted = new Set(
-        selection.itemNames.map((s) => s.toLowerCase().trim()),
-      );
+      const wanted = new Set(selection.itemNames.map((s) => s.toLowerCase().trim()));
       chosen = documents.filter((doc) => wanted.has(doc.name.toLowerCase().trim()));
     } else if (selection.indexes && selection.indexes.length > 0) {
-      chosen = selection.indexes
-        .map((i) => documents[i])
-        .filter((doc): doc is LibraryItemDocument => Boolean(doc));
+      chosen = selection.indexes.map((i) => documents[i]).filter((doc): doc is LibraryItemDocument => Boolean(doc));
     }
     return chosen.slice(0, selection.limit ?? 25);
   };
 
-  /** Clone an item's elements with fresh ids, a shared group, and an offset. */
   const placeItem = (
     item: LibraryItemDocument,
     offset: { x: number; y: number },
@@ -214,33 +209,18 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
         el.containerId = idMap.get(el.containerId)!;
       }
       if (el.boundElements) {
-        el.boundElements = el.boundElements
-          .map((b) => ({ ...b, id: idMap.get(b.id) ?? b.id }))
-          .filter((b) => b.id);
+        el.boundElements = el.boundElements.map((b) => ({ ...b, id: idMap.get(b.id) ?? b.id })).filter((b) => b.id);
       }
       if (el.startBinding?.elementId && idMap.has(el.startBinding.elementId)) {
-        el.startBinding = {
-          ...el.startBinding,
-          elementId: idMap.get(el.startBinding.elementId)!,
-        };
+        el.startBinding = { ...el.startBinding, elementId: idMap.get(el.startBinding.elementId)! };
       }
       if (el.endBinding?.elementId && idMap.has(el.endBinding.elementId)) {
-        el.endBinding = {
-          ...el.endBinding,
-          elementId: idMap.get(el.endBinding.elementId)!,
-        };
+        el.endBinding = { ...el.endBinding, elementId: idMap.get(el.endBinding.elementId)! };
       }
       return el;
     });
   };
 
-  /**
-   * Add selected library items onto a scene. With normalization + a placement,
-   * items are scaled/snapped and dropped into reserved icon slots (inside a
-   * card, as a badge, as an actor/database/cloud symbol) instead of tiled
-   * randomly. Every placed element is tagged with provenance metadata so the
-   * scene reports real library usage.
-   */
   const addItems = async (params: {
     scene: ExcalidrawScene;
     libraryId: string;
@@ -264,15 +244,16 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     items: Array<{ name: string; placement: Placement }>;
     librariesUsed: string[];
   }> => {
-    const documents = await getDocument(params.libraryId);
+    const documents = await getDocument(params.libraryId || PERSONAL_LIBRARY_ID);
     const chosen = selectItems(documents, {
       itemNames: params.itemNames,
       indexes: params.indexes,
       limit: params.limit,
     });
     if (chosen.length === 0) {
-      throw invalid("No matching library items were found to add.");
+      throw invalid("No matching personal library items were found to add.");
     }
+
     const nextId = newIdFactory();
     const grid = params.grid ?? 20;
     const spacing = params.spacing ?? 40;
@@ -283,15 +264,10 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
     const cellW = 220;
     const cellH = 200;
 
-    const cardBox =
-      params.targetCardId != null
-        ? cardBoxById(params.scene.elements, params.targetCardId)
-        : null;
+    const cardBox = params.targetCardId != null ? cardBoxById(params.scene.elements, params.targetCardId) : null;
     const isSlot =
       cardBox != null &&
-      (placement === "inside-card-left" ||
-        placement === "inside-card-top" ||
-        placement === "badge");
+      (placement === "inside-card-left" || placement === "inside-card-top" || placement === "badge");
 
     const added: ExcalidrawElement[] = [];
     const items: Array<{ name: string; placement: Placement }> = [];
@@ -318,7 +294,7 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
         els = els.map((e) => ({ ...e, frameId: params.frameId ?? null }));
       }
       els = tagItemElements(els, {
-        library: params.libraryId,
+        library: PERSONAL_LIBRARY_ID,
         item: item.name,
         placement: used,
       });
@@ -342,7 +318,7 @@ export const createLibraryAdapter = (deps: LibraryAdapterDeps) => {
       addedItems: chosen.length,
       addedElements: added.length,
       items,
-      librariesUsed: [params.libraryId],
+      librariesUsed: [PERSONAL_LIBRARY_ID],
     };
   };
 
