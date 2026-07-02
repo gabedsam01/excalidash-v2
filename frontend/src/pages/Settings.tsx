@@ -5,14 +5,29 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../api';
 import type { Collection } from '../types';
-import { Upload, Moon, Sun, Info, Archive, RefreshCw, Check, Zap, ZapOff, Languages } from 'lucide-react';
+import { Upload, Moon, Sun, Info, Archive, Zap, ZapOff, Languages, ShieldCheck } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { importLegacyFiles } from '../utils/importUtils';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import clsx from 'clsx';
 import { ApiKeysCard } from './settings/ApiKeysCard';
-import { LibrariesCard } from './settings/LibrariesCard';
+
+type BackupExportExt = 'excalidash' | 'excalidash.zip';
+
+type BackupInfo = {
+    formatVersion: number;
+    exportedAt: string;
+    excalidashBackendVersion: string | null;
+    collections: number;
+    drawings: number;
+};
+
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+    if (api.isAxiosError(err)) {
+        return err.response?.data?.message || err.response?.data?.error || fallback;
+    }
+    return err instanceof Error && err.message ? err.message : fallback;
+};
 
 export const Settings: React.FC = () => {
     const { t } = useTranslation();
@@ -31,17 +46,11 @@ export const Settings: React.FC = () => {
     });
     const [authDisableFinalConfirmOpen, setAuthDisableFinalConfirmOpen] = useState(false);
 
-    const [backupExportExt, setBackupExportExt] = useState<'excalidash' | 'excalidash.zip'>('excalidash');
+    const [backupExportExt, setBackupExportExt] = useState<BackupExportExt>('excalidash');
     const [backupImportConfirmation, setBackupImportConfirmation] = useState<{
         isOpen: boolean;
         file: File | null;
-        info: null | {
-            formatVersion: number;
-            exportedAt: string;
-            excalidashBackendVersion: string | null;
-            collections: number;
-            drawings: number;
-        };
+        info: BackupInfo | null;
     }>({ isOpen: false, file: null, info: null });
     const [backupImportLoading, setBackupImportLoading] = useState(false);
     const [backupImportSuccess, setBackupImportSuccess] = useState(false);
@@ -51,15 +60,11 @@ export const Settings: React.FC = () => {
     const buildLabel = import.meta.env.VITE_APP_BUILD_LABEL;
     const isManagedAuthMode = authMode !== 'local';
 
-    const UPDATE_CHANNEL_KEY = 'excalidash-update-channel';
-    const UPDATE_INFO_KEY = 'excalidash-update-info';
-    const [updateChannel, setUpdateChannel] = useState<api.UpdateChannel>(() => {
-        const raw = typeof window === 'undefined' ? null : window.localStorage?.getItem?.(UPDATE_CHANNEL_KEY) ?? null;
-        return raw === 'prerelease' ? 'prerelease' : 'stable';
+    const COMPRESSION_ENABLED_KEY = 'excalidash-image-compression';
+    const [imageCompression, setImageCompression] = useState<boolean>(() => {
+        const raw = typeof window === 'undefined' ? null : window.localStorage?.getItem?.(COMPRESSION_ENABLED_KEY);
+        return raw !== 'false';
     });
-    const [updateInfo, setUpdateInfo] = useState<api.UpdateInfo | null>(null);
-    const [updateLoading, setUpdateLoading] = useState(false);
-    const [updateError, setUpdateError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchCollections = async () => {
@@ -70,51 +75,17 @@ export const Settings: React.FC = () => {
                 console.error('Failed to fetch collections:', err);
             }
         };
-        fetchCollections();
+        void fetchCollections();
     }, []);
-
-    const COMPRESSION_ENABLED_KEY = 'excalidash-image-compression';
-    const [imageCompression, setImageCompression] = useState<boolean>(() => {
-        const raw = typeof window === 'undefined' ? null : window.localStorage?.getItem?.(COMPRESSION_ENABLED_KEY);
-        return raw !== 'false';
-    });
 
     const toggleImageCompression = () => {
         const next = !imageCompression;
         try {
             window.localStorage?.setItem?.(COMPRESSION_ENABLED_KEY, String(next));
-        } catch { }
+        } catch {
+        }
         setImageCompression(next);
     };
-
-    const checkForUpdates = async (channel: api.UpdateChannel) => {
-        setUpdateLoading(true);
-        setUpdateError(null);
-        try {
-            const info = await api.getUpdateInfo(channel);
-            setUpdateInfo(info);
-            try {
-                window.localStorage?.setItem?.(`${UPDATE_INFO_KEY}:${channel}`, JSON.stringify(info));
-            } catch {
-            }
-        } catch (err: unknown) {
-            let message = 'Failed to check for updates';
-            if (api.isAxiosError(err)) {
-                message =
-                    err.response?.data?.message ||
-                    err.response?.data?.error ||
-                    message;
-            }
-            setUpdateError(message);
-        } finally {
-            setUpdateLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        void checkForUpdates(updateChannel);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
 
     const setAuthEnabled = async (enabled: boolean) => {
         setAuthToggleLoading(true);
@@ -132,22 +103,14 @@ export const Settings: React.FC = () => {
 
             window.location.reload();
         } catch (err: unknown) {
-            let message = 'Failed to update authentication setting';
-            if (api.isAxiosError(err)) {
-                message =
-                    err.response?.data?.message ||
-                    err.response?.data?.error ||
-                    message;
-            }
-            setAuthToggleError(message);
+            setAuthToggleError(getApiErrorMessage(err, 'Failed to update authentication setting'));
         } finally {
             setAuthToggleLoading(false);
         }
     };
 
     const confirmToggleAuthEnabled = () => {
-        if (authEnabled === null) return;
-        if (authToggleLoading) return;
+        if (authEnabled === null || authToggleLoading) return;
         setAuthToggleConfirm({ isOpen: true, nextEnabled: !authEnabled });
     };
 
@@ -169,7 +132,7 @@ export const Settings: React.FC = () => {
             window.URL.revokeObjectURL(url);
         } catch (err: unknown) {
             console.error('Backup export failed:', err);
-            setBackupImportError({ isOpen: true, message: 'Failed to export backup. Please try again.' });
+            setBackupImportError({ isOpen: true, message: getApiErrorMessage(err, 'Failed to export backup. Please try again.') });
         }
     };
 
@@ -178,14 +141,7 @@ export const Settings: React.FC = () => {
         try {
             const formData = new FormData();
             formData.append('archive', file);
-            const response = await api.api.post<{
-                valid: boolean;
-                formatVersion: number;
-                exportedAt: string;
-                excalidashBackendVersion: string | null;
-                collections: number;
-                drawings: number;
-            }>('/import/excalidash/verify', formData, {
+            const response = await api.api.post<BackupInfo & { valid: boolean }>('/import/excalidash/verify', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
 
@@ -202,11 +158,7 @@ export const Settings: React.FC = () => {
             });
         } catch (err: unknown) {
             console.error('Backup verify failed:', err);
-            let message = 'Failed to verify backup file.';
-            if (api.isAxiosError(err)) {
-                message = err.response?.data?.message || err.response?.data?.error || message;
-            }
-            setBackupImportError({ isOpen: true, message });
+            setBackupImportError({ isOpen: true, message: getApiErrorMessage(err, 'Failed to verify backup file.') });
         } finally {
             setBackupImportLoading(false);
         }
@@ -234,8 +186,6 @@ export const Settings: React.FC = () => {
         else navigate(`/collections?id=${id}`);
     };
 
-
-
     return (
         <Layout
             collections={collections}
@@ -257,9 +207,11 @@ export const Settings: React.FC = () => {
 
             <ApiKeysCard />
 
-            <LibrariesCard />
+            <div className="mb-8 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/20 p-4 text-sm font-bold text-emerald-800 dark:text-emerald-200">
+                Curated/public library packs were removed. MCP now reads the authenticated user's personal Excalidraw library/templates.
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
                 <div className="flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)]">
                     <div className="w-12 h-12 sm:w-16 sm:h-16 bg-indigo-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-indigo-100 dark:border-neutral-700">
                         <Languages size={32} className="text-indigo-600 dark:text-indigo-400 hidden sm:block" />
@@ -284,19 +236,20 @@ export const Settings: React.FC = () => {
                     <div className="text-center">
                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Export Backup</h3>
                         <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">
-                            Exports an `.excalidash` archive organized by collections
+                            Export an `.excalidash` archive organized by collections.
                         </p>
                     </div>
                     <div className="w-full flex flex-col items-stretch gap-2 pt-2">
                         <button
                             onClick={exportBackup}
                             className="w-full px-4 py-2 text-sm font-bold rounded-xl border-2 border-black dark:border-neutral-700 bg-indigo-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 transition-all"
+                            type="button"
                         >
                             Export
                         </button>
                         <select
                             value={backupExportExt}
-                            onChange={(e) => setBackupExportExt(e.target.value as any)}
+                            onChange={(e) => setBackupExportExt(e.target.value as BackupExportExt)}
                             className="w-full px-3 py-2 text-sm font-bold rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-900 dark:text-white"
                             title="Download name"
                         >
@@ -309,25 +262,17 @@ export const Settings: React.FC = () => {
                 <button
                     onClick={toggleTheme}
                     className="w-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group"
+                    type="button"
                 >
-                    <div className="w-12 h-12 sm:w-16 sm:h-16 bg-amber-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-amber-100 dark:border-neutral-700 group-hover:border-amber-200 dark:group-hover:border-neutral-600 transition-colors">
-                        {theme === 'light' ? (
-                            <Moon size={32} className="text-amber-600 dark:text-amber-400 hidden sm:block" />
-                        ) : (
-                            <Sun size={32} className="text-amber-600 dark:text-amber-400 hidden sm:block" />
-                        )}
-                        {theme === 'light' ? (
-                            <Moon size={24} className="text-amber-600 dark:text-amber-400 sm:hidden" />
-                        ) : (
-                            <Sun size={24} className="text-amber-600 dark:text-amber-400 sm:hidden" />
-                        )}
+                    <div className="w-12 h-12 sm:w-16 sm:h-16 bg-amber-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-amber-100 dark:border-neutral-700">
+                        {theme === 'light' ? <Moon size={32} className="text-amber-600 dark:text-amber-400" /> : <Sun size={32} className="text-amber-600 dark:text-amber-400" />}
                     </div>
                     <div className="text-center">
                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
                             {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">
-                            Switch to {theme === 'light' ? 'dark' : 'light'} theme
+                            Switch to {theme === 'light' ? 'dark' : 'light'} theme.
                         </p>
                     </div>
                 </button>
@@ -335,138 +280,27 @@ export const Settings: React.FC = () => {
                 <button
                     onClick={toggleImageCompression}
                     className="w-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group"
+                    type="button"
                 >
-                    <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-blue-100 dark:border-neutral-700 group-hover:border-blue-200 dark:group-hover:border-neutral-600 transition-colors">
-                        {imageCompression ? (
-                            <Zap size={32} className="text-blue-600 dark:text-blue-400 hidden sm:block" />
-                        ) : (
-                            <ZapOff size={32} className="text-blue-600 dark:text-blue-400 hidden sm:block" />
-                        )}
-                        {imageCompression ? (
-                            <Zap size={24} className="text-blue-600 dark:text-blue-400 sm:hidden" />
-                        ) : (
-                            <ZapOff size={24} className="text-blue-600 dark:text-blue-400 sm:hidden" />
-                        )}
+                    <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-blue-100 dark:border-neutral-700">
+                        {imageCompression ? <Zap size={32} className="text-blue-600 dark:text-blue-400" /> : <ZapOff size={32} className="text-blue-600 dark:text-blue-400" />}
                     </div>
                     <div className="text-center">
                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
                             {imageCompression ? 'Optimized Images' : 'Raw Images'}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">
-                            {imageCompression ? 'Lossy compression enabled' : 'Lossless (high bandwidth) enabled'}
+                            {imageCompression ? 'Lossy compression enabled.' : 'Lossless mode enabled.'}
                         </p>
                     </div>
                 </button>
-
-                <div className="flex flex-col p-4 sm:p-6 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)]">
-                    <div className="flex items-center gap-3 sm:gap-4 mb-6">
-                        <div className="w-12 h-12 sm:w-16 sm:h-16 flex-shrink-0 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl flex items-center justify-center border-2 border-emerald-100 dark:border-emerald-800/50 relative overflow-hidden group">
-                            <div className="absolute inset-0 opacity-[0.2] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] [background-size:12px_12px]"></div>
-                            <RefreshCw size={28} className={clsx("text-emerald-600 dark:text-emerald-400 relative z-10 sm:hidden", updateLoading && "animate-spin")} />
-                            <RefreshCw size={32} className={clsx("text-emerald-600 dark:text-emerald-400 relative z-10 hidden sm:block", updateLoading && "animate-spin")} />
-                        </div>
-                        <div className="min-w-0">
-                            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white truncate">Updates</h3>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4 flex-1">
-                        <div className="p-3 sm:p-4 rounded-xl border-2 border-slate-100 dark:border-neutral-800 bg-slate-50/50 dark:bg-neutral-800/30">
-                            <div className="flex items-center justify-between mb-2">
-                                <label className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400 dark:text-neutral-500" htmlFor="settings-update-channel">
-                                    Channel
-                                </label>
-                                <span className={clsx(
-                                    "px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-tighter border",
-                                    updateChannel === 'stable' 
-                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800/50" 
-                                        : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800/50"
-                                )}>
-                                    {updateChannel}
-                                </span>
-                            </div>
-                            <select
-                                id="settings-update-channel"
-                                value={updateChannel}
-                                onChange={(e) => {
-                                    const next = (e.target.value === 'prerelease' ? 'prerelease' : 'stable') as api.UpdateChannel;
-                                    try {
-                                        window.localStorage?.setItem?.(UPDATE_CHANNEL_KEY, next);
-                                    } catch {
-                                    }
-                                    setUpdateChannel(next);
-                                    void checkForUpdates(next);
-                                }}
-                                className="w-full h-10 px-2 sm:px-3 rounded-lg border-2 border-black dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.2)]"
-                            >
-                                <option value="stable">Stable</option>
-                                <option value="prerelease">Prerelease</option>
-                            </select>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                            <div className="flex items-center justify-between px-1">
-                                <span className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-neutral-500 uppercase tracking-widest">Current Status</span>
-                            </div>
-                            <div className={clsx(
-                                "px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-2 sm:gap-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.2)]",
-                                updateInfo?.outboundEnabled === false ? "bg-slate-50 border-slate-200 text-slate-500 dark:bg-neutral-800 dark:border-neutral-700" :
-                                updateLoading ? "bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300" :
-                                updateInfo?.isUpdateAvailable ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800/50" :
-                                updateError ? "bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300" :
-                                "bg-slate-50 border-slate-200 text-slate-600 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-300"
-                            )}>
-                                {updateLoading && <RefreshCw size={14} className="animate-spin flex-shrink-0" />}
-                                <span className="truncate">
-                                    {updateInfo?.outboundEnabled === false ? "Checks disabled" :
-                                     updateLoading ? "Checking..." :
-                                     updateInfo?.isUpdateAvailable ? `v${updateInfo.latestVersion} available` :
-                                     updateInfo?.latestVersion ? (
-                                        <span className="flex items-center gap-1.5">
-                                            <Check size={14} strokeWidth={3} className="text-emerald-500 flex-shrink-0" />
-                                            Up to date
-                                        </span>
-                                     ) :
-                                     updateError ? updateError :
-                                     "Status unknown"}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-6 sm:mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                            onClick={() => void checkForUpdates(updateChannel)}
-                            disabled={updateLoading}
-                            className="flex items-center justify-center gap-2 h-10 sm:h-11 rounded-xl border-2 border-black dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.2)] text-[9px] sm:text-[10px] font-black uppercase tracking-wider hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-none disabled:opacity-50"
-                            type="button"
-                        >
-                            Check Now
-                        </button>
-
-                        <a
-                            href="https://github.com/ZimengXiong/ExcaliDash/releases"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center justify-center gap-2 h-10 sm:h-11 rounded-xl border-2 border-black dark:border-neutral-700 bg-indigo-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-[9px] sm:text-[10px] font-black uppercase tracking-wider hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-none"
-                        >
-                            Releases
-                        </a>
-                    </div>
-
-                    {updateInfo?.error && !updateLoading && (
-                        <div className="mt-4 p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 text-[10px] font-bold text-red-600 dark:text-red-400 italic">
-                            Error: {updateInfo.error}
-                        </div>
-                    )}
-                </div>
             </div>
 
             <details className="mt-8 bg-white/30 dark:bg-neutral-900/30 border border-slate-200/70 dark:border-neutral-800/70 rounded-2xl p-4 sm:p-6">
                 <summary className="cursor-pointer select-none font-bold text-slate-800 dark:text-neutral-200">
                     Advanced / Legacy
                 </summary>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
                     <div className="relative">
                         <input
                             type="file"
@@ -483,18 +317,16 @@ export const Settings: React.FC = () => {
                         <button
                             onClick={() => document.getElementById('settings-import-backup')?.click()}
                             disabled={backupImportLoading}
-                            className="w-full h-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full h-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
+                            type="button"
                         >
-                            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-blue-100 dark:border-neutral-700">
-                                <Upload size={32} className="text-blue-600 dark:text-blue-400 hidden sm:block" />
-                                <Upload size={24} className="text-blue-600 dark:text-blue-400 sm:hidden" />
-                            </div>
+                            <Upload size={32} className="text-blue-600 dark:text-blue-400" />
                             <div className="text-center">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
                                     {backupImportLoading ? 'Verifying…' : 'Import Backup'}
                                 </h3>
                                 <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">
-                                    Merge-import a `.excalidash` backup into your account
+                                    Merge-import a `.excalidash` backup into your account.
                                 </p>
                             </div>
                         </button>
@@ -508,12 +340,10 @@ export const Settings: React.FC = () => {
                             authToggleLoading ||
                             (authEnabled === true && user?.role !== 'ADMIN')
                         }
-                        className="w-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] disabled:hover:translate-y-0"
+                        className="w-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
+                        type="button"
                     >
-                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-slate-200 dark:border-neutral-700 group-hover:border-slate-300 dark:group-hover:border-neutral-600 transition-colors">
-                            <Info size={32} className="text-slate-700 dark:text-neutral-300 hidden sm:block" />
-                            <Info size={24} className="text-slate-700 dark:text-neutral-300 sm:hidden" />
-                        </div>
+                        <ShieldCheck size={32} className="text-slate-700 dark:text-neutral-300" />
                         <div className="text-center">
                             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
                                 {authEnabled ? 'Authentication: On' : 'Authentication: Off'}
@@ -548,7 +378,7 @@ export const Settings: React.FC = () => {
                                 if (result.failed > 0) {
                                     setImportError({
                                         isOpen: true,
-                                        message: `Import complete with errors.\nSuccess: ${result.success}\nFailed: ${result.failed}\nErrors:\n${result.errors.join('\n')}`
+                                        message: `Import complete with errors.\nSuccess: ${result.success}\nFailed: ${result.failed}\nErrors:\n${result.errors.join('\n')}`,
                                     });
                                 } else {
                                     setImportSuccess({ isOpen: true, message: `Imported ${result.success} file(s).` });
@@ -559,24 +389,19 @@ export const Settings: React.FC = () => {
                         />
                         <button
                             onClick={() => document.getElementById('settings-import-legacy')?.click()}
-                            className="w-full h-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group"
+                            className="w-full h-full flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)] hover:-translate-y-1 transition-all duration-200 group"
+                            type="button"
                         >
-                            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-amber-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-amber-100 dark:border-neutral-700">
-                                <Upload size={32} className="text-amber-600 dark:text-amber-400 hidden sm:block" />
-                                <Upload size={24} className="text-amber-600 dark:text-amber-400 sm:hidden" />
-                            </div>
+                            <Upload size={32} className="text-amber-600 dark:text-amber-400" />
                             <div className="text-center">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Legacy Import</h3>
-                                <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">Import `.excalidraw`, legacy JSON, or a `.zip` archive</p>
+                                <p className="text-xs text-slate-500 dark:text-neutral-400 font-medium max-w-[200px] mx-auto">Import `.excalidraw`, legacy JSON, or a `.zip` archive.</p>
                             </div>
                         </button>
                     </div>
 
                     <div className="flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-6 lg:p-8 bg-white dark:bg-neutral-900 border-2 border-black dark:border-neutral-700 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.2)]">
-                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-50 dark:bg-neutral-800 rounded-2xl flex items-center justify-center border-2 border-gray-100 dark:border-neutral-700">
-                            <Info size={32} className="text-gray-600 dark:text-gray-400 hidden sm:block" />
-                            <Info size={24} className="text-gray-600 dark:text-gray-400 sm:hidden" />
-                        </div>
+                        <Info size={32} className="text-gray-600 dark:text-gray-400" />
                         <div className="text-center">
                             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Version Info</h3>
                             <div className="text-[10px] sm:text-xs text-slate-500 dark:text-neutral-400 font-bold flex flex-col items-center gap-1">
@@ -626,9 +451,7 @@ export const Settings: React.FC = () => {
                         ? 'This will require users to sign in. You will be prompted to set up an admin account immediately.'
                         : (
                             <div className="space-y-2 text-left">
-                                <div>
-                                    This will turn off authentication for the entire instance.
-                                </div>
+                                <div>This will turn off authentication for the entire instance.</div>
                                 <div className="font-semibold text-rose-700 dark:text-rose-300">
                                     Recommendation: keep authentication enabled unless this instance is fully private.
                                 </div>
@@ -700,11 +523,7 @@ export const Settings: React.FC = () => {
                         setBackupImportSuccess(true);
                     } catch (err: unknown) {
                         console.error('Backup import failed:', err);
-                        let message = 'Failed to import backup.';
-                        if (api.isAxiosError(err)) {
-                            message = err.response?.data?.message || err.response?.data?.error || message;
-                        }
-                        setBackupImportError({ isOpen: true, message });
+                        setBackupImportError({ isOpen: true, message: getApiErrorMessage(err, 'Failed to import backup.') });
                         setBackupImportConfirmation({ isOpen: false, file: null, info: null });
                     } finally {
                         setBackupImportLoading(false);
@@ -736,6 +555,6 @@ export const Settings: React.FC = () => {
                 onConfirm={() => setBackupImportError({ isOpen: false, message: '' })}
                 onCancel={() => setBackupImportError({ isOpen: false, message: '' })}
             />
-        </Layout >
+        </Layout>
     );
 };
