@@ -374,6 +374,10 @@ export const ApiKeysCard: React.FC = () => {
                 <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100"><code>{command}</code></pre>
               </div>
             ))}
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400 mb-2">Useful commands</p>
+              <pre className="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-950 p-4 text-xs text-slate-100"><code>{CODEX_USEFUL_COMMANDS}</code></pre>
+            </div>
             <details className="rounded-xl border-2 border-slate-200 dark:border-neutral-700 bg-slate-50/50 dark:bg-neutral-800/30 p-4">
               <summary className="cursor-pointer text-xs font-black uppercase tracking-wider text-slate-500 dark:text-neutral-400">Advanced: manual config.toml</summary>
               <div className="mt-3 flex justify-end mb-2">
